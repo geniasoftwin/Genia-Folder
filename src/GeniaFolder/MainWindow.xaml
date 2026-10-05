@@ -69,7 +69,7 @@
                                             Click="Color_Click" />
                                     <Button Content="{Binding ProtectionActionLabel}"
                                             Tag="{Binding Id}"
-                                            IsEnabled="{Binding Exists}"
+                                            IsEnabled="{Binding ProtectionEnabled}"
                                             Click="Protection_Click" />
                                     <Button Content="Убрать"
                                             Tag="{Binding Id}"

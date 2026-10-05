@@ -38,23 +38,9 @@ public sealed class FolderIdentityService
             return null;
         }
 
-        unsafe
-        {
-            var bytes = new byte[16];
-
-            fixed (byte* source = info.FileId.Identifier)
-            {
-                Marshal.Copy(
-                    (IntPtr)source,
-                    bytes,
-                    0,
-                    bytes.Length);
-            }
-
-            return new FolderIdentity(
-                info.VolumeSerialNumber,
-                Convert.ToHexString(bytes));
-        }
+        return new FolderIdentity(
+            info.VolumeSerialNumber,
+            $"{info.FileId.Part1:X16}{info.FileId.Part2:X16}");
     }
 
     public bool Matches(
@@ -101,13 +87,14 @@ public sealed class FolderIdentityService
         int dwBufferSize);
 
     [StructLayout(LayoutKind.Sequential)]
-    private unsafe struct FILE_ID_128
+    private struct FILE_ID_128
     {
-        public fixed byte Identifier[16];
+        public ulong Part1;
+        public ulong Part2;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private unsafe struct FILE_ID_INFO
+    private struct FILE_ID_INFO
     {
         public ulong VolumeSerialNumber;
         public FILE_ID_128 FileId;

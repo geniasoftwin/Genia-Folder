@@ -220,25 +220,16 @@ public partial class MainWindow : Window
 
             if (vaultInfo?.State == VaultCopyState.VerifiedCopy)
             {
-                var available =
-                    !string.IsNullOrWhiteSpace(vaultInfo.Path) &&
-                    Directory.Exists(vaultInfo.Path);
+                var details = new VaultDetailsWindow(
+                    folder,
+                    vaultInfo,
+                    _protection,
+                    _vaultEncryption)
+                {
+                    Owner = this
+                };
 
-                MessageBox.Show(this,
-                    "Для этой папки уже создан и полностью проверен encrypted vault.\n\n" +
-                    $"Файлов: {vaultInfo.FileCount}\n" +
-                    $"Исходный объём: {FormatBytes(vaultInfo.PlaintextBytes)}\n" +
-                    $"Vault: {vaultInfo.Path}\n\n" +
-                    (available
-                        ? "Зашифрованная копия доступна."
-                        : "ВНИМАНИЕ: зарегистрированный vault сейчас не найден.") +
-                    "\n\nИсходная папка пока остаётся обычной и доступной. " +
-                    "Мы ещё не удаляем plaintext до отдельного этапа безопасной активации и восстановления.",
-                    "GeniaFolder — encrypted vault",
-                    MessageBoxButton.OK,
-                    available
-                        ? MessageBoxImage.Information
-                        : MessageBoxImage.Warning);
+                details.ShowDialog();
                 return;
             }
 

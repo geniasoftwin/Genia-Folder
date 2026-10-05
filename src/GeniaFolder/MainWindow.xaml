@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="GeniaFolder" Height="650" Width="920"
         MinHeight="520" MinWidth="760"
+        Icon="/GeniaFolder;component/Assets/GeniaFolder.ico"
         Background="{StaticResource WindowBackground}"
         WindowStartupLocation="CenterScreen">
     <Grid Margin="28">
@@ -28,31 +29,51 @@
         </Grid>
 
         <Border Grid.Row="1" Margin="0,24,0,14" Padding="14" CornerRadius="10" Background="#FFF8E1" BorderBrush="#F4D77D" BorderThickness="1">
-            <TextBlock Text="Версия 0.1.3: цвета и управление папками. Защита паролем появится только вместе с реальным шифрованием — без ложной 'защиты' интерфейсом." TextWrapping="Wrap" Foreground="#6B5715" />
+            <TextBlock Text="Версия 0.1.4: цветные папки, контроль доступности и новая иконка. Защита паролем появится только вместе с реальным шифрованием." TextWrapping="Wrap" Foreground="#6B5715" />
         </Border>
 
         <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
             <ItemsControl x:Name="FolderList">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <Border Margin="0,0,0,10" Padding="16" Background="White" CornerRadius="12" BorderBrush="#E4E6EA" BorderThickness="1">
+                        <Border Margin="0,0,0,10"
+                                Padding="16"
+                                Background="White"
+                                CornerRadius="12"
+                                BorderBrush="#E4E6EA"
+                                BorderThickness="1"
+                                Opacity="{Binding CardOpacity}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="12" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
+
                                 <Border Grid.Column="0" Background="{Binding ColorBrush}" CornerRadius="6" />
+
                                 <StackPanel Grid.Column="1" Margin="14,0,16,0">
                                     <TextBlock Text="{Binding Name}" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" />
                                     <TextBlock Text="{Binding Path}" Margin="0,4,0,0" Foreground="{StaticResource TextSecondary}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding Status}" Margin="0,5,0,0" FontSize="12" Foreground="{StaticResource TextSecondary}" />
+                                    <TextBlock Text="{Binding Status}" Margin="0,5,0,0" FontSize="12" Foreground="{Binding StatusBrush}" />
                                 </StackPanel>
+
                                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Button Content="Открыть" Tag="{Binding Id}" Click="Open_Click" />
-                                    <Button Content="Цвет" Tag="{Binding Id}" Click="Color_Click" />
-                                    <Button Content="Защита" Tag="{Binding Id}" Click="Protection_Click" />
-                                    <Button Content="Убрать" Tag="{Binding Id}" Click="Remove_Click" />
+                                    <Button Content="Открыть"
+                                            Tag="{Binding Id}"
+                                            IsEnabled="{Binding Exists}"
+                                            Click="Open_Click" />
+                                    <Button Content="Цвет"
+                                            Tag="{Binding Id}"
+                                            IsEnabled="{Binding Exists}"
+                                            Click="Color_Click" />
+                                    <Button Content="Защита"
+                                            Tag="{Binding Id}"
+                                            IsEnabled="{Binding Exists}"
+                                            Click="Protection_Click" />
+                                    <Button Content="Убрать"
+                                            Tag="{Binding Id}"
+                                            Click="Remove_Click" />
                                 </StackPanel>
                             </Grid>
                         </Border>

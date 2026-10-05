@@ -15,10 +15,12 @@ public partial class MainWindow : Window
 {
     private readonly FolderRegistryService _registry = new();
     private readonly FolderAppearanceService _appearance = new();
+    private readonly FolderIdentityService _folderIdentity = new();
     private readonly ProtectionService _protection = new();
     private readonly VaultEncryptionService _vaultEncryption = new();
     private readonly ObservableCollection<FolderRow> _rows = [];
     private List<ManagedFolder> _folders = [];
+    private bool _refreshingFolderLocations;
 
     public MainWindow()
     {
@@ -30,7 +32,7 @@ public partial class MainWindow : Window
         // Explorer, removable drives and network locations may change while
         // GeniaFolder is in the background. Refresh availability whenever the
         // user returns to the application.
-        Activated += (_, _) => RebuildRows();
+        Activated += async (_, _) => await RefreshFolderLocationsAsync();
         Closing += MainWindow_Closing;
     }
 
@@ -47,7 +49,130 @@ public partial class MainWindow : Window
     private async Task ReloadAsync()
     {
         _folders = await _registry.LoadAsync();
-        RebuildRows();
+        await RefreshFolderLocationsAsync();
+    }
+
+    private async Task RefreshFolderLocationsAsync()
+    {
+        if (_refreshingFolderLocations)
+            return;
+
+        _refreshingFolderLocations = true;
+
+        try
+        {
+            var changed = ReconcileFolderLocations();
+
+            if (changed)
+                await _registry.SaveAsync(_folders);
+
+            RebuildRows();
+        }
+        finally
+        {
+            _refreshingFolderLocations = false;
+        }
+    }
+
+    private bool ReconcileFolderLocations()
+    {
+        var changed = false;
+
+        foreach (var folder in _folders)
+        {
+            var storageState = _protection.HasPreparedProfile(folder.Id)
+                ? _protection.GetStorageInfo(folder.Id)?.State
+                    ?? VaultStorageState.PlaintextPresent
+                : VaultStorageState.PlaintextPresent;
+
+            if (Directory.Exists(folder.Path))
+            {
+                if (folder.VolumeSerialNumber == 0 ||
+                    string.IsNullOrWhiteSpace(folder.FileId))
+                {
+                    changed |= CaptureFolderIdentity(folder);
+                }
+
+                continue;
+            }
+
+            // In Vault-only/LockPending the missing plaintext path is expected
+            // and must never be "repaired" by adopting another directory.
+            if (storageState != VaultStorageState.PlaintextPresent ||
+                folder.VolumeSerialNumber == 0 ||
+                string.IsNullOrWhiteSpace(folder.FileId))
+            {
+                continue;
+            }
+
+            var parent = Directory.GetParent(folder.Path)?.FullName;
+            if (string.IsNullOrWhiteSpace(parent) ||
+                !Directory.Exists(parent))
+            {
+                continue;
+            }
+
+            string? renamedPath = null;
+
+            try
+            {
+                foreach (var candidate in Directory.EnumerateDirectories(
+                    parent,
+                    "*",
+                    SearchOption.TopDirectoryOnly))
+                {
+                    if (_folderIdentity.Matches(
+                        candidate,
+                        folder.VolumeSerialNumber,
+                        folder.FileId))
+                    {
+                        renamedPath = Path.GetFullPath(candidate);
+                        break;
+                    }
+                }
+            }
+            catch
+            {
+                // Availability/status handling remains unchanged if the parent
+                // cannot be enumerated (offline/network/access denied).
+            }
+
+            if (renamedPath is null)
+                continue;
+
+            folder.Path = renamedPath;
+            folder.Name =
+                Path.GetFileName(
+                    renamedPath.TrimEnd(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar))
+                is { Length: > 0 } name
+                    ? name
+                    : renamedPath;
+
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private bool CaptureFolderIdentity(ManagedFolder folder)
+    {
+        var identity = _folderIdentity.TryGetIdentity(folder.Path);
+        if (identity is null)
+            return false;
+
+        var changed =
+            folder.VolumeSerialNumber != identity.VolumeSerialNumber ||
+            !string.Equals(
+                folder.FileId,
+                identity.FileId,
+                StringComparison.OrdinalIgnoreCase);
+
+        folder.VolumeSerialNumber = identity.VolumeSerialNumber;
+        folder.FileId = identity.FileId;
+
+        return changed;
     }
 
     private void RebuildRows()
@@ -210,6 +335,8 @@ public partial class MainWindow : Window
             Color = FolderColor.Blue
         };
 
+        CaptureFolderIdentity(folder);
+
         try
         {
             await _appearance.ApplyColorAsync(path, folder.Color);
@@ -287,7 +414,18 @@ public partial class MainWindow : Window
                     Owner = this
                 };
 
-                details.ShowDialog();
+                var detailsResult = details.ShowDialog();
+
+                if (detailsResult == true &&
+                    Directory.Exists(folder.Path) &&
+                    (_protection.GetStorageInfo(folder.Id)?.State
+                        ?? VaultStorageState.PlaintextPresent) ==
+                       VaultStorageState.PlaintextPresent &&
+                    CaptureFolderIdentity(folder))
+                {
+                    await _registry.SaveAsync(_folders);
+                }
+
                 RebuildRows();
                 return;
             }

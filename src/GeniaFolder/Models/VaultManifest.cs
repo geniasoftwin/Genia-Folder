@@ -40,3 +40,9 @@ public sealed record VerifiedVaultResult(
     int DirectoryCount,
     long PlaintextBytes,
     string ManifestCiphertextSha256);
+
+public sealed record VaultRestoreResult(
+    string RestoredPath,
+    int FileCount,
+    int DirectoryCount,
+    long PlaintextBytes);

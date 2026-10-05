@@ -3,6 +3,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using MediaColor = System.Windows.Media.Color;
 using GeniaFolder.Models;
 
 namespace GeniaFolder.Services;
@@ -53,15 +54,15 @@ public sealed class FolderAppearanceService
         RefreshExplorer(folderPath);
     }
 
-    public static Color GetColor(FolderColor color) => color switch
+    public static MediaColor GetColor(FolderColor color) => color switch
     {
-        FolderColor.Blue => Color.FromRgb(55, 126, 235),
-        FolderColor.Green => Color.FromRgb(52, 168, 83),
-        FolderColor.Yellow => Color.FromRgb(244, 180, 0),
-        FolderColor.Orange => Color.FromRgb(243, 124, 32),
-        FolderColor.Red => Color.FromRgb(218, 68, 83),
-        FolderColor.Purple => Color.FromRgb(142, 68, 173),
-        _ => Color.FromRgb(120, 124, 132)
+        FolderColor.Blue => MediaColor.FromRgb(55, 126, 235),
+        FolderColor.Green => MediaColor.FromRgb(52, 168, 83),
+        FolderColor.Yellow => MediaColor.FromRgb(244, 180, 0),
+        FolderColor.Orange => MediaColor.FromRgb(243, 124, 32),
+        FolderColor.Red => MediaColor.FromRgb(218, 68, 83),
+        FolderColor.Purple => MediaColor.FromRgb(142, 68, 173),
+        _ => MediaColor.FromRgb(120, 124, 132)
     };
 
     private static string GetIconFileName(FolderColor color) =>
@@ -145,7 +146,7 @@ public sealed class FolderAppearanceService
         }
     }
 
-    private static async Task WriteColorIconAsync(string path, Color color)
+    private static async Task WriteColorIconAsync(string path, MediaColor color)
     {
         const int size = 64;
 
@@ -155,7 +156,7 @@ public sealed class FolderAppearanceService
             var body = new SolidColorBrush(color);
             body.Freeze();
 
-            var tabColor = Color.FromRgb(
+            var tabColor = MediaColor.FromRgb(
                 (byte)Math.Min(255, color.R + 18),
                 (byte)Math.Min(255, color.G + 18),
                 (byte)Math.Min(255, color.B + 18));

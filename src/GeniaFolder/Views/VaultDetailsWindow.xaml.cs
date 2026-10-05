@@ -56,7 +56,9 @@ public partial class VaultDetailsWindow : Window
                     ? "ВНИМАНИЕ: профиль находится в Vault-only, но исходный plaintext-путь снова существует. Автоматическая разблокировка остановлена, чтобы не перезаписать данные."
                     : "Vault-only активен. Обычная plaintext-папка удалена из файловой системы. Доступ возвращается только через проверенное восстановление из encrypted vault.";
 
-                StorageActionButton.Content = "Разблокировать папку";
+                StorageActionButton.Content = Directory.Exists(_folder.Path)
+                    ? "Завершить разблокировку"
+                    : "Разблокировать папку";
                 break;
 
             case VaultStorageState.LockPending:
@@ -106,29 +108,24 @@ public partial class VaultDetailsWindow : Window
 
         if (storage.State == VaultStorageState.VaultOnly)
         {
-            if (Directory.Exists(_folder.Path))
-            {
-                MessageBox.Show(this,
-                    "Исходный путь уже существует. GeniaFolder не будет перезаписывать его автоматически. " +
-                    "Сначала переместите/переименуйте эту папку или восстановите отдельную копию.",
-                    "GeniaFolder — конфликт разблокировки",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-                return;
-            }
+            var existingPlaintext = Directory.Exists(_folder.Path);
 
             var restore = new VaultRestoreWindow(
                 _folder,
                 _vaultInfo.Path,
                 _folder.Path,
                 _protection,
-                _vault)
+                _vault,
+                verifyExistingPlaintextOnly: existingPlaintext)
             {
                 Owner = this
             };
 
-            if (restore.ShowDialog() != true ||
-                restore.Result is not { } result)
+            if (restore.ShowDialog() != true)
+                return;
+
+            if (!existingPlaintext &&
+                restore.Result is not { } restored)
             {
                 return;
             }
@@ -143,12 +140,16 @@ public partial class VaultDetailsWindow : Window
                     _folder.Path,
                     _folder.Color);
 
+                var message = existingPlaintext
+                    ? "Существующая plaintext-папка полностью совпала с encrypted vault. Прерванная разблокировка безопасно завершена."
+                    : "Папка разблокирована и полностью восстановлена из encrypted vault.\n\n" +
+                      $"Файлов: {restored!.FileCount}\n" +
+                      $"Объём: {FormatBytes(restored.PlaintextBytes)}\n" +
+                      $"Путь: {restored.RestoredPath}\n\n" +
+                      "Encrypted vault сохранён как проверенная резервная копия.";
+
                 MessageBox.Show(this,
-                    "Папка разблокирована и полностью восстановлена из encrypted vault.\n\n" +
-                    $"Файлов: {result.FileCount}\n" +
-                    $"Объём: {FormatBytes(result.PlaintextBytes)}\n" +
-                    $"Путь: {result.RestoredPath}\n\n" +
-                    "Encrypted vault сохранён как проверенная резервная копия.",
+                    message,
                     "GeniaFolder — папка разблокирована",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
@@ -158,9 +159,9 @@ public partial class VaultDetailsWindow : Window
             catch (Exception ex)
             {
                 MessageBox.Show(this,
-                    "Файлы восстановлены, но не удалось завершить состояние профиля/цвет папки:\n" +
+                    "Plaintext доступен, но не удалось завершить состояние профиля/цвет папки:\n" +
                     ex.Message +
-                    "\n\nНе удаляйте восстановленную папку. Повторно откройте Vault для диагностики.",
+                    "\n\nНе удаляйте эту папку. Повторно откройте Vault: GeniaFolder сможет byte-for-byte сверить её и завершить разблокировку.",
                     "GeniaFolder — требуется проверка",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);

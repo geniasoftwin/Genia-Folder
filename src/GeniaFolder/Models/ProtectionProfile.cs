@@ -14,6 +14,25 @@ public sealed class ProtectionProfile
 
     public RecoveryKdfSettings RecoveryKdf { get; set; } = new();
     public WrappedKeyMaterial RecoveryWrappedFek { get; set; } = new();
+
+    public VaultCopyInfo Vault { get; set; } = new();
+}
+
+public enum VaultCopyState
+{
+    None,
+    VerifiedCopy
+}
+
+public sealed class VaultCopyInfo
+{
+    public VaultCopyState State { get; set; } = VaultCopyState.None;
+    public string Path { get; set; } = string.Empty;
+    public DateTimeOffset? VerifiedAt { get; set; }
+    public int FileCount { get; set; }
+    public int DirectoryCount { get; set; }
+    public long PlaintextBytes { get; set; }
+    public string ManifestCiphertextSha256 { get; set; } = string.Empty;
 }
 
 public sealed class PasswordKdfSettings

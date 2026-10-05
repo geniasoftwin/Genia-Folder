@@ -29,7 +29,7 @@
         </Grid>
 
         <Border Grid.Row="1" Margin="0,24,0,14" Padding="14" CornerRadius="10" Background="#FFF8E1" BorderBrush="#F4D77D" BorderThickness="1">
-            <TextBlock Text="Версия 0.2.0-alpha.3: проверенный encrypted vault теперь можно восстановить в отдельную папку с AEAD + SHA-256 проверкой." TextWrapping="Wrap" Foreground="#6B5715" />
+            <TextBlock Text="Версия 0.2.0-alpha.4: восстановление vault работает и по паролю, и через бумажный Master Recovery Key." TextWrapping="Wrap" Foreground="#6B5715" />
         </Border>
 
         <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">

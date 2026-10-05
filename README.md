@@ -2,16 +2,24 @@
 
 GeniaFolder is a small Windows utility for managing useful folders without replacing Explorer.
 
-## 0.1.2 scope
+## Current version: 0.1.6
+
+Implemented:
 
 - add an existing Windows folder;
 - create a new folder;
 - assign a visible color/icon in Explorer;
+- immediate Explorer refresh when the color changes;
 - open folders quickly;
-- keep a lightweight local registry;
-- remove a folder from GeniaFolder without deleting user data.
+- track folders that are deleted, disconnected or restored;
+- remove a folder from GeniaFolder without deleting user data;
+- minimize normally to the Windows taskbar;
+- close with **X** to keep GeniaFolder running in the notification area;
+- double-click the tray icon to restore the window;
+- exit the process explicitly from the tray menu;
+- single-instance protection: starting GeniaFolder again restores the already-running instance instead of creating a duplicate.
 
-Password protection is deliberately not faked in 0.1. It will be introduced only with authenticated encryption and a recovery design.
+Password protection is deliberately not faked. It will be introduced only with authenticated encryption, Master Recovery and a crash/force-kill-safe lifecycle.
 
 ## Build
 
@@ -32,11 +40,14 @@ GeniaFolder metadata is stored in:
 
 `%LOCALAPPDATA%\GeniaFolder\folders.json`
 
-The managed folder itself receives hidden `.geniafolder.ico` and `desktop.ini` files so Windows Explorer can display the assigned color. Legacy `.geniafolder/folder.ico` data is migrated away when it is safe to do so.
+Managed folders receive hidden per-color icon files such as `.geniafolder-blue.ico` plus `desktop.ini`, allowing Windows Explorer to show the selected color while avoiding stale icon-cache reuse.
 
-## 0.1.2 fixes
+## Lifecycle policy
 
-- Repeated color changes now reset hidden/system attributes before rewriting `desktop.ini`.
-- Folder color metadata uses hidden `.geniafolder.ico` instead of a visible `.geniafolder` directory.
-- Legacy `.geniafolder/folder.ico` is removed automatically when safe.
-- `Создать папку` now opens a GeniaFolder create dialog first; the system folder picker is only opened by `Обзор…`.
+- **Minimize (—):** normal taskbar minimize.
+- **Close (X):** hide the window and continue in the tray.
+- **Tray → Exit:** terminate GeniaFolder.
+- **Second launch:** activate the existing instance.
+- **Force kill/crash:** the operating system releases the single-instance mutex automatically; the next launch is allowed.
+
+The future protection layer must not depend on graceful process shutdown for data security.

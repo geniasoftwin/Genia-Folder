@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.2
+## Current version: 0.2.0-alpha.3
 
 Implemented:
 
@@ -84,3 +84,19 @@ This milestone adds real content encryption without deleting plaintext source da
 - cancellation or failure cleans the staging copy and never modifies source files.
 
 A verified vault is still a **copy** in alpha.2. Plaintext activation/removal is intentionally deferred until restore testing is implemented.
+
+
+## 0.2.0-alpha.3 verified restore
+
+The verified encrypted vault can now be restored into a new, separate folder:
+
+- the user chooses the parent directory for the restored copy;
+- the FEK is unlocked from the folder password only in memory;
+- the encrypted manifest is authenticated before any restore output is trusted;
+- all manifest paths are validated to prevent rooted paths, `..` traversal, invalid segments and case-insensitive path collisions;
+- every encrypted chunk is authenticated with AES-256-GCM before plaintext is written;
+- restored bytes are hashed while decrypting and must match the SHA-256 stored when the vault was created;
+- restore output is written into a staging directory and published with a directory rename only after the complete restore succeeds;
+- cancellation/failure cleans the staging restore and leaves the original folder and encrypted vault unchanged.
+
+Plaintext removal is still disabled. The next security milestone should exercise recovery-key restoration and repeated crash/restore tests before activation of a vault-only mode.

@@ -16,6 +16,21 @@ public sealed class ProtectionProfile
     public WrappedKeyMaterial RecoveryWrappedFek { get; set; } = new();
 
     public VaultCopyInfo Vault { get; set; } = new();
+    public VaultStorageInfo Storage { get; set; } = new();
+}
+
+public enum VaultStorageState
+{
+    PlaintextPresent,
+    LockPending,
+    VaultOnly
+}
+
+public sealed class VaultStorageInfo
+{
+    public VaultStorageState State { get; set; } = VaultStorageState.PlaintextPresent;
+    public string PendingPlaintextPath { get; set; } = string.Empty;
+    public DateTimeOffset? VaultOnlyActivatedAt { get; set; }
 }
 
 public enum VaultCopyState

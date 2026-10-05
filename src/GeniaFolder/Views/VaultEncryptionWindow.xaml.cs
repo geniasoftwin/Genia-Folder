@@ -15,6 +15,7 @@ public partial class VaultEncryptionWindow : Window
     private bool _running;
     private bool _cancelRequested;
     private bool _commitStarted;
+    private bool _closeAfterCancel;
 
     public VerifiedVaultResult? Result { get; private set; }
 
@@ -55,6 +56,7 @@ public partial class VaultEncryptionWindow : Window
         SetRunning(true);
         _cancelRequested = false;
         _commitStarted = false;
+        _closeAfterCancel = false;
         _cancellation = new CancellationTokenSource();
 
         var password = PasswordBox.Password;
@@ -105,25 +107,38 @@ public partial class VaultEncryptionWindow : Window
                 _folder.Id,
                 Result);
 
+            // DialogResult closes the modal window. Mark the operation as
+            // finished first so Closing does not reinterpret success as cancel.
+            SetRunning(false);
             DialogResult = true;
         }
         catch (OperationCanceledException)
         {
+            var closeAfterCancel = _closeAfterCancel;
+
             Result = null;
             ErrorText.Text = string.Empty;
             StatusText.Text =
                 "Операция отменена. Временный vault очищен; исходные файлы не изменялись.";
             ProgressBar.Value = 0;
             SetRunning(false);
+
+            if (closeAfterCancel)
+                DialogResult = false;
         }
         catch (Exception ex)
         {
+            var closeAfterFailure = _closeAfterCancel;
+
             ErrorText.Text =
                 "Не удалось создать проверенный vault: " + ex.Message;
 
             StatusText.Text =
                 "Исходная папка не изменялась. Можно исправить проблему и повторить.";
             SetRunning(false);
+
+            if (closeAfterFailure)
+                DialogResult = false;
         }
         finally
         {
@@ -160,8 +175,16 @@ public partial class VaultEncryptionWindow : Window
             return;
 
         e.Cancel = true;
+        _closeAfterCancel = true;
 
-        if (_commitStarted || _cancelRequested)
+        if (_commitStarted)
+        {
+            StatusText.Text =
+                "Vault уже проверен. Завершаем короткое сохранение профиля…";
+            return;
+        }
+
+        if (_cancelRequested)
             return;
 
         _cancelRequested = true;

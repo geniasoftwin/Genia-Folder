@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Media;
 using GeniaFolder.Models;
 using GeniaFolder.Services;
 using Microsoft.Win32;
@@ -32,6 +33,166 @@ public partial class VaultDetailsWindow : Window
             $"Проверен: {vaultInfo.VerifiedAt?.ToLocalTime():g}";
 
         VaultPathText.Text = $"Vault: {vaultInfo.Path}";
+
+        RefreshStorageState();
+    }
+
+    private void RefreshStorageState()
+    {
+        var storage = _protection.GetStorageInfo(_folder.Id)
+            ?? new VaultStorageInfo();
+
+        switch (storage.State)
+        {
+            case VaultStorageState.VaultOnly:
+                StateBorder.Background = new SolidColorBrush(
+                    Color.FromRgb(0xEE, 0xF8, 0xF0));
+                StateBorder.BorderBrush = new SolidColorBrush(
+                    Color.FromRgb(0xA7, 0xD7, 0xAF));
+                StateText.Foreground = new SolidColorBrush(
+                    Color.FromRgb(0x24, 0x5D, 0x2E));
+
+                StateText.Text = Directory.Exists(_folder.Path)
+                    ? "ВНИМАНИЕ: профиль находится в Vault-only, но исходный plaintext-путь снова существует. Автоматическая разблокировка остановлена, чтобы не перезаписать данные."
+                    : "Vault-only активен. Обычная plaintext-папка удалена из файловой системы. Доступ возвращается только через проверенное восстановление из encrypted vault.";
+
+                StorageActionButton.Content = "Разблокировать папку";
+                break;
+
+            case VaultStorageState.LockPending:
+                StateBorder.Background = new SolidColorBrush(
+                    Color.FromRgb(0xFF, 0xF8, 0xE1));
+                StateBorder.BorderBrush = new SolidColorBrush(
+                    Color.FromRgb(0xF4, 0xD7, 0x7D));
+                StateText.Foreground = new SolidColorBrush(
+                    Color.FromRgb(0x6B, 0x57, 0x15));
+
+                StateText.Text =
+                    "Предыдущая блокировка была прервана. Профиль находится в LockPending. GeniaFolder может повторно проверить vault и безопасно продолжить транзакцию.";
+                StorageActionButton.Content = "Продолжить блокировку";
+                break;
+
+            default:
+                StateBorder.Background = new SolidColorBrush(
+                    Color.FromRgb(0xEE, 0xF8, 0xF0));
+                StateBorder.BorderBrush = new SolidColorBrush(
+                    Color.FromRgb(0xA7, 0xD7, 0xAF));
+                StateText.Foreground = new SolidColorBrush(
+                    Color.FromRgb(0x24, 0x5D, 0x2E));
+
+                StateText.Text =
+                    "Vault прошёл полную криптографическую проверку, но plaintext пока существует. Можно восстановить отдельную копию или перевести папку в настоящий Vault-only.";
+                StorageActionButton.Content = "Заблокировать папку";
+                break;
+        }
+    }
+
+    private async void StorageAction_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (!Directory.Exists(_vaultInfo.Path))
+        {
+            MessageBox.Show(this,
+                "Зарегистрированный encrypted vault сейчас не найден.",
+                "GeniaFolder",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        var storage = _protection.GetStorageInfo(_folder.Id)
+            ?? new VaultStorageInfo();
+
+        if (storage.State == VaultStorageState.VaultOnly)
+        {
+            if (Directory.Exists(_folder.Path))
+            {
+                MessageBox.Show(this,
+                    "Исходный путь уже существует. GeniaFolder не будет перезаписывать его автоматически. " +
+                    "Сначала переместите/переименуйте эту папку или восстановите отдельную копию.",
+                    "GeniaFolder — конфликт разблокировки",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            var restore = new VaultRestoreWindow(
+                _folder,
+                _vaultInfo.Path,
+                _folder.Path,
+                _protection,
+                _vault)
+            {
+                Owner = this
+            };
+
+            if (restore.ShowDialog() != true ||
+                restore.Result is not { } result)
+            {
+                return;
+            }
+
+            try
+            {
+                await _protection.MarkPlaintextPresentAsync(
+                    _folder.Id);
+
+                var appearance = new FolderAppearanceService();
+                await appearance.ApplyColorAsync(
+                    _folder.Path,
+                    _folder.Color);
+
+                MessageBox.Show(this,
+                    "Папка разблокирована и полностью восстановлена из encrypted vault.\n\n" +
+                    $"Файлов: {result.FileCount}\n" +
+                    $"Объём: {FormatBytes(result.PlaintextBytes)}\n" +
+                    $"Путь: {result.RestoredPath}\n\n" +
+                    "Encrypted vault сохранён как проверенная резервная копия.",
+                    "GeniaFolder — папка разблокирована",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+
+                DialogResult = true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this,
+                    "Файлы восстановлены, но не удалось завершить состояние профиля/цвет папки:\n" +
+                    ex.Message +
+                    "\n\nНе удаляйте восстановленную папку. Повторно откройте Vault для диагностики.",
+                    "GeniaFolder — требуется проверка",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+
+            return;
+        }
+
+        var lockWindow = new VaultLockWindow(
+            _folder,
+            _vaultInfo,
+            _protection,
+            _vault)
+        {
+            Owner = this
+        };
+
+        if (lockWindow.ShowDialog() == true)
+        {
+            MessageBox.Show(this,
+                "Vault-only активирован. Обычная plaintext-папка удалена из файловой системы. " +
+                "Encrypted vault и Master Recovery остаются единственными путями к данным.",
+                "GeniaFolder — папка заблокирована",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+
+            DialogResult = true;
+        }
+        else
+        {
+            RefreshStorageState();
+        }
     }
 
     private void Restore_Click(object sender, RoutedEventArgs e)

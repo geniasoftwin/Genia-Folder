@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -27,6 +28,17 @@ public partial class MainWindow : Window
         // GeniaFolder is in the background. Refresh availability whenever the
         // user returns to the application.
         Activated += (_, _) => RebuildRows();
+        Closing += MainWindow_Closing;
+    }
+
+    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (System.Windows.Application.Current is not App app || app.ExitRequested)
+            return;
+
+        e.Cancel = true;
+        Hide();
+        app.NotifyHiddenToTray();
     }
 
     private async Task ReloadAsync()

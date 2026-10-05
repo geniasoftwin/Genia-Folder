@@ -81,6 +81,39 @@ public sealed class ProtectionService
         }
     }
 
+    public async Task<UnlockedProtectionSession?> UnlockWithRecoveryKeyAsync(
+        Guid folderId,
+        string recoveryKey)
+    {
+        var profile = await LoadProfileAsync(folderId);
+        if (profile is null)
+            return null;
+
+        try
+        {
+            var fek = UnwrapWithRecovery(profile, recoveryKey);
+
+            if (fek.Length != FekSize)
+            {
+                CryptographicOperations.ZeroMemory(fek);
+                throw new CryptographicException("Некорректный FEK.");
+            }
+
+            return new UnlockedProtectionSession(
+                profile.ProfileId,
+                profile.FolderId,
+                fek);
+        }
+        catch (CryptographicException)
+        {
+            return null;
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
     public async Task MarkVaultVerifiedAsync(
         Guid folderId,
         VerifiedVaultResult result)

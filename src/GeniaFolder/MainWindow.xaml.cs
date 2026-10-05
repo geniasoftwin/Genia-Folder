@@ -15,6 +15,7 @@ public partial class MainWindow : Window
 {
     private readonly FolderRegistryService _registry = new();
     private readonly FolderAppearanceService _appearance = new();
+    private readonly ProtectionService _protection = new();
     private readonly ObservableCollection<FolderRow> _rows = [];
     private List<ManagedFolder> _folders = [];
 
@@ -55,16 +56,30 @@ public partial class MainWindow : Window
         foreach (var folder in _folders.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase))
         {
             var exists = Directory.Exists(folder.Path);
+            var protectionPrepared = _protection.HasPreparedProfile(folder.Id);
+
+            var status = !exists
+                ? "Папка не найдена или диск недоступен"
+                : protectionPrepared
+                    ? "Ключи Standard готовы · файлы пока НЕ зашифрованы"
+                    : folder.ProtectionLabel;
+
+            var statusBrush = !exists
+                ? Brushes.Firebrick
+                : protectionPrepared
+                    ? Brushes.DarkGoldenrod
+                    : Brushes.Gray;
 
             _rows.Add(new FolderRow(
                 folder.Id,
                 folder.Name,
                 folder.Path,
                 new SolidColorBrush(FolderAppearanceService.GetColor(folder.Color)),
-                exists ? folder.ProtectionLabel : "Папка не найдена или диск недоступен",
+                status,
                 exists,
-                exists ? Brushes.Gray : Brushes.Firebrick,
-                exists ? 1.0 : 0.72));
+                statusBrush,
+                exists ? 1.0 : 0.72,
+                protectionPrepared ? "Ключи" : "Защита"));
         }
     }
 
@@ -168,16 +183,91 @@ public partial class MainWindow : Window
         }
     }
 
-    private void Protection_Click(object sender, RoutedEventArgs e)
+    private async void Protection_Click(object sender, RoutedEventArgs e)
     {
-        if (!TryGetAvailableFolder(sender, out _))
+        if (!TryGetAvailableFolder(sender, out var folder))
             return;
 
-        MessageBox.Show(this,
-            "Защиту подключим следующим этапом: пароль + шифрование + бумажный Master Recovery Key.\n\nGeniaFolder не будет выдавать обычную папку с UI-паролем за защищённую.",
-            "GeniaFolder — защита",
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
+        if (_protection.HasPreparedProfile(folder.Id))
+        {
+            var fingerprint = _protection.GetProfileFingerprint(folder.Id);
+
+            MessageBox.Show(this,
+                "Для этой папки уже создан профиль Standard Protection.\n\n" +
+                $"Fingerprint: {fingerprint}\n\n" +
+                "Пароль и Master Recovery Key уже оборачивают реальный случайный FEK. " +
+                "Но содержимое папки пока остаётся обычным и НЕ зашифровано — шифрование файлов подключим следующим шагом 0.2.",
+                "GeniaFolder — ключи защиты готовы",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var setup = new ProtectionSetupWindow(folder.Name) { Owner = this };
+        if (setup.ShowDialog() != true)
+            return;
+
+        PreparedProtectionProfile prepared;
+
+        try
+        {
+            prepared = _protection.PrepareStandardProfile(
+                folder,
+                setup.Password);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this,
+                $"Не удалось создать ключи защиты:\n{ex.Message}",
+                "GeniaFolder — защита",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
+        finally
+        {
+            setup.ClearSecrets();
+        }
+
+        var recovery = new RecoveryKeyWindow(
+            folder.Name,
+            prepared.RecoveryKey,
+            prepared.Fingerprint)
+        {
+            Owner = this
+        };
+
+        if (recovery.ShowDialog() != true)
+        {
+            MessageBox.Show(this,
+                "Настройка защиты отменена. Профиль ключей не был сохранён.",
+                "GeniaFolder",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            await _protection.SavePreparedProfileAsync(prepared.Profile);
+            RebuildRows();
+
+            MessageBox.Show(this,
+                "Ключи Standard Protection сохранены.\n\n" +
+                "Пароль и Master Recovery Key проверены, FEK хранится только в зашифрованном виде.\n\n" +
+                "ВАЖНО: файлы в папке пока ещё НЕ зашифрованы. Следующий этап — безопасное шифрование содержимого.",
+                "GeniaFolder — этап 0.2",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this,
+                $"Не удалось сохранить профиль защиты:\n{ex.Message}",
+                "GeniaFolder — защита",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
     }
 
     private async void Remove_Click(object sender, RoutedEventArgs e)
@@ -248,5 +338,6 @@ public partial class MainWindow : Window
         string Status,
         bool Exists,
         MediaBrush StatusBrush,
-        double CardOpacity);
+        double CardOpacity,
+        string ProtectionActionLabel);
 }

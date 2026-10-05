@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="src/GeniaFolder/GeniaFolder.csproj" />
+  <Project Path="tests/GeniaFolder.SecuritySmokeTests/GeniaFolder.SecuritySmokeTests.csproj" />
 </Solution>

@@ -62,3 +62,18 @@ Vault v1 properties:
 - the final vault directory is published only after staging and verification complete.
 
 The next milestone must implement restore/decryption testing before any plaintext source removal can be offered.
+
+
+## Implemented in 0.2.0-alpha.3
+
+Restore is now implemented as an isolated verification path:
+
+- restoration always targets a new folder and never overwrites an existing path;
+- the encrypted manifest is authenticated before its paths are used;
+- manifest paths are constrained to the restore root and checked for traversal/collisions;
+- each file is restored chunk-by-chunk only after AES-256-GCM authentication succeeds;
+- SHA-256 of restored plaintext must match the hash recorded at vault creation;
+- output is staged under a temporary restore directory and renamed into place only after every file passes;
+- cancellation or failure removes the staging output and does not modify the source plaintext or vault.
+
+This provides an end-to-end encrypt -> verify -> restore -> verify loop before any feature is allowed to remove plaintext source data.

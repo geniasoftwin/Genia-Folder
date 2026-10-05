@@ -697,6 +697,10 @@ public sealed class VaultEncryptionService
         if (Directory.Exists(destinationPath) || File.Exists(destinationPath))
             throw new IOException("Папка восстановления уже существует.");
 
+        if (IsSameOrChildPath(destinationPath, vaultPath))
+            throw new InvalidOperationException(
+                "Восстановление внутрь encrypted vault запрещено.");
+
         var destinationParent = Directory.GetParent(destinationPath)?.FullName;
         if (string.IsNullOrWhiteSpace(destinationParent) ||
             !Directory.Exists(destinationParent))
@@ -1062,6 +1066,25 @@ public sealed class VaultEncryptionService
             if (!seen.Add(path))
                 throw new CryptographicException("Manifest содержит дублирующиеся пути.");
         }
+    }
+
+    private static bool IsSameOrChildPath(
+        string candidate,
+        string root)
+    {
+        var fullCandidate = Path.GetFullPath(candidate)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        var fullRoot = Path.GetFullPath(root)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        return string.Equals(
+                   fullCandidate,
+                   fullRoot,
+                   StringComparison.OrdinalIgnoreCase) ||
+               fullCandidate.StartsWith(
+                   fullRoot + Path.DirectorySeparatorChar,
+                   StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetSafeRestorePath(

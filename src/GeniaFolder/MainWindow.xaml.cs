@@ -61,6 +61,9 @@ public partial class MainWindow : Window
             var vaultInfo = protectionPrepared
                 ? _protection.GetVaultInfo(folder.Id)
                 : null;
+            var storageInfo = protectionPrepared
+                ? _protection.GetStorageInfo(folder.Id)
+                : null;
 
             var vaultVerified =
                 vaultInfo?.State == VaultCopyState.VerifiedCopy;
@@ -70,31 +73,76 @@ public partial class MainWindow : Window
                 !string.IsNullOrWhiteSpace(vaultInfo!.Path) &&
                 Directory.Exists(vaultInfo.Path);
 
-            var status = !exists
-                ? "Папка не найдена или диск недоступен"
-                : vaultVerified && vaultAvailable
-                    ? "Зашифрованная копия проверена · оригиналы пока на месте"
-                    : vaultVerified
-                        ? "Vault зарегистрирован, но сейчас не найден · оригиналы пока на месте"
-                        : protectionPrepared
-                            ? "Ключи Standard готовы · файлы пока НЕ зашифрованы"
-                            : folder.ProtectionLabel;
+            var storageState =
+                storageInfo?.State ?? VaultStorageState.PlaintextPresent;
 
-            var statusBrush = !exists
-                ? Brushes.Firebrick
-                : vaultVerified && vaultAvailable
-                    ? Brushes.DarkGreen
-                    : vaultVerified
-                        ? Brushes.Firebrick
-                        : protectionPrepared
-                            ? Brushes.DarkGoldenrod
-                            : Brushes.Gray;
+            string status;
+            MediaBrush statusBrush;
+            string protectionAction;
+            bool protectionEnabled;
+            double cardOpacity;
 
-            var protectionAction = vaultVerified
-                ? "Vault"
-                : protectionPrepared
-                    ? "Шифровать"
-                    : "Защита";
+            if (storageState == VaultStorageState.VaultOnly)
+            {
+                status = !vaultAvailable
+                    ? "КРИТИЧНО: Vault-only активен, но encrypted vault недоступен"
+                    : exists
+                        ? "ВНИМАНИЕ: Vault-only активен, но plaintext-путь снова существует"
+                        : "Заблокировано · Vault-only · plaintext удалён";
+
+                statusBrush = !vaultAvailable || exists
+                    ? Brushes.Firebrick
+                    : Brushes.DarkGreen;
+
+                protectionAction = "Vault";
+                protectionEnabled = vaultAvailable;
+                cardOpacity = 1.0;
+            }
+            else if (storageState == VaultStorageState.LockPending)
+            {
+                status = vaultAvailable
+                    ? "Блокировка не завершена · LockPending · откройте Vault для продолжения"
+                    : "КРИТИЧНО: LockPending, но encrypted vault недоступен";
+
+                statusBrush = vaultAvailable
+                    ? Brushes.DarkGoldenrod
+                    : Brushes.Firebrick;
+
+                protectionAction = "Vault";
+                protectionEnabled = vaultAvailable;
+                cardOpacity = 1.0;
+            }
+            else
+            {
+                status = !exists
+                    ? "Папка не найдена или диск недоступен"
+                    : vaultVerified && vaultAvailable
+                        ? "Зашифрованная копия проверена · оригиналы пока на месте"
+                        : vaultVerified
+                            ? "Vault зарегистрирован, но сейчас не найден · оригиналы пока на месте"
+                            : protectionPrepared
+                                ? "Ключи Standard готовы · файлы пока НЕ зашифрованы"
+                                : folder.ProtectionLabel;
+
+                statusBrush = !exists
+                    ? Brushes.Firebrick
+                    : vaultVerified && vaultAvailable
+                        ? Brushes.DarkGreen
+                        : vaultVerified
+                            ? Brushes.Firebrick
+                            : protectionPrepared
+                                ? Brushes.DarkGoldenrod
+                                : Brushes.Gray;
+
+                protectionAction = vaultVerified
+                    ? "Vault"
+                    : protectionPrepared
+                        ? "Шифровать"
+                        : "Защита";
+
+                protectionEnabled = exists;
+                cardOpacity = exists ? 1.0 : 0.72;
+            }
 
             _rows.Add(new FolderRow(
                 folder.Id,
@@ -104,8 +152,9 @@ public partial class MainWindow : Window
                 status,
                 exists,
                 statusBrush,
-                exists ? 1.0 : 0.72,
-                protectionAction));
+                cardOpacity,
+                protectionAction,
+                protectionEnabled));
         }
     }
 
@@ -211,7 +260,7 @@ public partial class MainWindow : Window
 
     private async void Protection_Click(object sender, RoutedEventArgs e)
     {
-        if (!TryGetAvailableFolder(sender, out var folder))
+        if (!TryGetFolder(sender, out var folder))
             return;
 
         if (_protection.HasPreparedProfile(folder.Id))
@@ -230,6 +279,14 @@ public partial class MainWindow : Window
                 };
 
                 details.ShowDialog();
+                RebuildRows();
+                return;
+            }
+
+            if (!Directory.Exists(folder.Path))
+            {
+                RebuildRows();
+                ShowFolderUnavailable(folder);
                 return;
             }
 
@@ -259,6 +316,13 @@ public partial class MainWindow : Window
                     MessageBoxImage.Information);
             }
 
+            return;
+        }
+
+        if (!Directory.Exists(folder.Path))
+        {
+            RebuildRows();
+            ShowFolderUnavailable(folder);
             return;
         }
 
@@ -334,6 +398,16 @@ public partial class MainWindow : Window
     {
         if (!TryGetFolder(sender, out var folder))
             return;
+
+        if (_protection.HasPreparedProfile(folder.Id))
+        {
+            MessageBox.Show(this,
+                "Защищённую папку пока нельзя просто убрать из GeniaFolder: профиль ключей и encrypted vault могут стать недоступны из интерфейса.\n\nСначала разблокируйте/восстановите данные. Отдельное безопасное удаление vault и профиля добавим позже.",
+                "GeniaFolder — защищённая папка",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
 
         var locationNote = Directory.Exists(folder.Path)
             ? "Сама папка и её файлы НЕ будут удалены."
@@ -414,5 +488,6 @@ public partial class MainWindow : Window
         bool Exists,
         MediaBrush StatusBrush,
         double CardOpacity,
-        string ProtectionActionLabel);
+        string ProtectionActionLabel,
+        bool ProtectionEnabled);
 }

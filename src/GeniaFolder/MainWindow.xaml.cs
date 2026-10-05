@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using MediaBrush = System.Windows.Media.Brush;
 using GeniaFolder.Models;
 using GeniaFolder.Services;
 using GeniaFolder.Views;
@@ -243,9 +244,9 @@ public partial class MainWindow : Window
         Guid Id,
         string Name,
         string Path,
-        Brush ColorBrush,
+        MediaBrush ColorBrush,
         string Status,
         bool Exists,
-        Brush StatusBrush,
+        MediaBrush StatusBrush,
         double CardOpacity);
 }

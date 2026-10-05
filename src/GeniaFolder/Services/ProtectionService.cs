@@ -25,9 +25,19 @@ public sealed class ProtectionService
     };
 
     public ProtectionService()
+        : this(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "GeniaFolder",
+            "protection"))
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        _profilesRoot = Path.Combine(appData, "GeniaFolder", "protection");
+    }
+
+    public ProtectionService(string profilesRoot)
+    {
+        if (string.IsNullOrWhiteSpace(profilesRoot))
+            throw new ArgumentException("Profiles root is required.", nameof(profilesRoot));
+
+        _profilesRoot = Path.GetFullPath(profilesRoot);
         Directory.CreateDirectory(_profilesRoot);
     }
 

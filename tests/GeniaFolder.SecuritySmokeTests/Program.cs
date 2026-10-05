@@ -241,6 +241,149 @@ internal static class Program
 
             Pass("orphan staging cleaned after simulated force-kill");
 
+            var vaultInfo = protection.GetVaultInfo(folder.Id)
+                ?? throw new InvalidOperationException(
+                    "Verified vault info is missing.");
+
+            var vaultOnly = new VaultOnlyService(
+                protection,
+                vault);
+
+            var changedAfterVault = Path.Combine(
+                source,
+                "changed-after-vault.txt");
+
+            await File.WriteAllTextAsync(
+                changedAfterVault,
+                "This file did not exist when the vault was created.");
+
+            using (var passwordSession =
+                await RequirePasswordSessionAsync(protection, folder.Id))
+            {
+                await ExpectInvalidOperationAsync(
+                    "Vault-only with stale plaintext",
+                    async () =>
+                    {
+                        await vaultOnly.ActivateOrResumeAsync(
+                            folder,
+                            vaultInfo,
+                            passwordSession);
+                    });
+            }
+
+            Assert(
+                Directory.Exists(source),
+                "stale vault rejection must keep plaintext source");
+
+            Assert(
+                protection.GetStorageInfo(folder.Id)?.State ==
+                VaultStorageState.PlaintextPresent,
+                "stale vault rejection must not change storage state");
+
+            File.Delete(changedAfterVault);
+            Pass("stale vault cannot delete changed plaintext");
+
+            using (var passwordSession =
+                await RequirePasswordSessionAsync(protection, folder.Id))
+            {
+                await vaultOnly.ActivateOrResumeAsync(
+                    folder,
+                    vaultInfo,
+                    passwordSession);
+            }
+
+            Assert(
+                !Directory.Exists(source),
+                "Vault-only must remove plaintext source path");
+
+            Assert(
+                protection.GetStorageInfo(folder.Id)?.State ==
+                VaultStorageState.VaultOnly,
+                "profile must enter VaultOnly after plaintext removal");
+
+            Pass("Vault-only removes matching plaintext only after verification");
+
+            var orphanRestoreStaging = source + ".tmp-hardkill";
+            Directory.CreateDirectory(orphanRestoreStaging);
+            await File.WriteAllTextAsync(
+                Path.Combine(orphanRestoreStaging, "partial.txt"),
+                "simulated interrupted unlock plaintext");
+
+            using (var recoverySession =
+                await protection.UnlockWithRecoveryKeyAsync(
+                    folder.Id,
+                    recoveryKey)
+                ?? throw new InvalidOperationException(
+                    "Valid Master Recovery Key failed to unlock FEK."))
+            {
+                await vault.RestoreVaultAsync(
+                    built.VaultPath,
+                    source,
+                    recoverySession);
+            }
+
+            Assert(
+                !Directory.Exists(orphanRestoreStaging),
+                "unlock must clean stale restore staging");
+
+            await protection.MarkPlaintextPresentAsync(
+                folder.Id);
+
+            await AssertTreesEqualAsync(
+                passwordRestore,
+                source);
+
+            Pass("Vault-only unlock restores byte-identical plaintext");
+
+            var pendingPath = Path.Combine(
+                root,
+                $".geniafolder-plaintext-{folder.Id:N}.pending-delete-smoke");
+
+            await protection.MarkLockPendingAsync(
+                folder.Id,
+                pendingPath);
+
+            Directory.Move(source, pendingPath);
+
+            using (var passwordSession =
+                await RequirePasswordSessionAsync(protection, folder.Id))
+            {
+                await vaultOnly.ActivateOrResumeAsync(
+                    folder,
+                    vaultInfo,
+                    passwordSession);
+            }
+
+            Assert(
+                !Directory.Exists(source) &&
+                !Directory.Exists(pendingPath),
+                "LockPending resume must remove quarantine and source");
+
+            Assert(
+                protection.GetStorageInfo(folder.Id)?.State ==
+                VaultStorageState.VaultOnly,
+                "LockPending resume must finish in VaultOnly");
+
+            Pass("LockPending resumes safely after simulated hard kill");
+
+            using (var passwordSession =
+                await RequirePasswordSessionAsync(protection, folder.Id))
+            {
+                await vault.RestoreVaultAsync(
+                    built.VaultPath,
+                    source,
+                    passwordSession);
+            }
+
+            await protection.MarkPlaintextPresentAsync(
+                folder.Id);
+
+            await AssertTreesEqualAsync(
+                passwordRestore,
+                source);
+
+            Pass("final unlock after resumed LockPending is byte-identical");
+
             Console.WriteLine();
             Console.WriteLine("[PASS] All security smoke tests passed.");
             return 0;
@@ -366,6 +509,24 @@ internal static class Program
             return;
         }
         catch (EndOfStreamException)
+        {
+            Pass(scenario + " rejected");
+            return;
+        }
+
+        throw new InvalidOperationException(
+            scenario + " was accepted unexpectedly.");
+    }
+
+    private static async Task ExpectInvalidOperationAsync(
+        string scenario,
+        Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (InvalidOperationException)
         {
             Pass(scenario + " rejected");
             return;

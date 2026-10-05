@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private readonly FolderRegistryService _registry = new();
     private readonly FolderAppearanceService _appearance = new();
     private readonly ProtectionService _protection = new();
+    private readonly VaultEncryptionService _vaultEncryption = new();
     private readonly ObservableCollection<FolderRow> _rows = [];
     private List<ManagedFolder> _folders = [];
 
@@ -57,18 +58,43 @@ public partial class MainWindow : Window
         {
             var exists = Directory.Exists(folder.Path);
             var protectionPrepared = _protection.HasPreparedProfile(folder.Id);
+            var vaultInfo = protectionPrepared
+                ? _protection.GetVaultInfo(folder.Id)
+                : null;
+
+            var vaultVerified =
+                vaultInfo?.State == VaultCopyState.VerifiedCopy;
+
+            var vaultAvailable =
+                vaultVerified &&
+                !string.IsNullOrWhiteSpace(vaultInfo!.Path) &&
+                Directory.Exists(vaultInfo.Path);
 
             var status = !exists
                 ? "Папка не найдена или диск недоступен"
-                : protectionPrepared
-                    ? "Ключи Standard готовы · файлы пока НЕ зашифрованы"
-                    : folder.ProtectionLabel;
+                : vaultVerified && vaultAvailable
+                    ? "Зашифрованная копия проверена · оригиналы пока на месте"
+                    : vaultVerified
+                        ? "Vault зарегистрирован, но сейчас не найден · оригиналы пока на месте"
+                        : protectionPrepared
+                            ? "Ключи Standard готовы · файлы пока НЕ зашифрованы"
+                            : folder.ProtectionLabel;
 
             var statusBrush = !exists
                 ? Brushes.Firebrick
+                : vaultVerified && vaultAvailable
+                    ? Brushes.DarkGreen
+                    : vaultVerified
+                        ? Brushes.Firebrick
+                        : protectionPrepared
+                            ? Brushes.DarkGoldenrod
+                            : Brushes.Gray;
+
+            var protectionAction = vaultVerified
+                ? "Vault"
                 : protectionPrepared
-                    ? Brushes.DarkGoldenrod
-                    : Brushes.Gray;
+                    ? "Шифровать"
+                    : "Защита";
 
             _rows.Add(new FolderRow(
                 folder.Id,
@@ -79,7 +105,7 @@ public partial class MainWindow : Window
                 exists,
                 statusBrush,
                 exists ? 1.0 : 0.72,
-                protectionPrepared ? "Ключи" : "Защита"));
+                protectionAction));
         }
     }
 
@@ -190,16 +216,58 @@ public partial class MainWindow : Window
 
         if (_protection.HasPreparedProfile(folder.Id))
         {
-            var fingerprint = _protection.GetProfileFingerprint(folder.Id);
+            var vaultInfo = _protection.GetVaultInfo(folder.Id);
 
-            MessageBox.Show(this,
-                "Для этой папки уже создан профиль Standard Protection.\n\n" +
-                $"Fingerprint: {fingerprint}\n\n" +
-                "Пароль и Master Recovery Key уже оборачивают реальный случайный FEK. " +
-                "Но содержимое папки пока остаётся обычным и НЕ зашифровано — шифрование файлов подключим следующим шагом 0.2.",
-                "GeniaFolder — ключи защиты готовы",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            if (vaultInfo?.State == VaultCopyState.VerifiedCopy)
+            {
+                var available =
+                    !string.IsNullOrWhiteSpace(vaultInfo.Path) &&
+                    Directory.Exists(vaultInfo.Path);
+
+                MessageBox.Show(this,
+                    "Для этой папки уже создан и полностью проверен encrypted vault.\n\n" +
+                    $"Файлов: {vaultInfo.FileCount}\n" +
+                    $"Исходный объём: {FormatBytes(vaultInfo.PlaintextBytes)}\n" +
+                    $"Vault: {vaultInfo.Path}\n\n" +
+                    (available
+                        ? "Зашифрованная копия доступна."
+                        : "ВНИМАНИЕ: зарегистрированный vault сейчас не найден.") +
+                    "\n\nИсходная папка пока остаётся обычной и доступной. " +
+                    "Мы ещё не удаляем plaintext до отдельного этапа безопасной активации и восстановления.",
+                    "GeniaFolder — encrypted vault",
+                    MessageBoxButton.OK,
+                    available
+                        ? MessageBoxImage.Information
+                        : MessageBoxImage.Warning);
+                return;
+            }
+
+            var vaultWindow = new VaultEncryptionWindow(
+                folder,
+                _protection,
+                _vaultEncryption)
+            {
+                Owner = this
+            };
+
+            if (vaultWindow.ShowDialog() == true &&
+                vaultWindow.Result is { } result)
+            {
+                RebuildRows();
+
+                MessageBox.Show(this,
+                    "Encrypted vault создан и полностью проверен.\n\n" +
+                    $"Файлов: {result.FileCount}\n" +
+                    $"Папок: {result.DirectoryCount}\n" +
+                    $"Исходный объём: {FormatBytes(result.PlaintextBytes)}\n" +
+                    $"Vault: {result.VaultPath}\n\n" +
+                    "Каждый файл был расшифрован в памяти и проверен по SHA-256. " +
+                    "Исходные файлы НЕ удалялись и НЕ изменялись.",
+                    "GeniaFolder — vault проверен",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+
             return;
         }
 
@@ -255,8 +323,9 @@ public partial class MainWindow : Window
             MessageBox.Show(this,
                 "Ключи Standard Protection сохранены.\n\n" +
                 "Пароль и Master Recovery Key проверены, FEK хранится только в зашифрованном виде.\n\n" +
-                "ВАЖНО: файлы в папке пока ещё НЕ зашифрованы. Следующий этап — безопасное шифрование содержимого.",
-                "GeniaFolder — этап 0.2",
+                "Теперь кнопка «Шифровать» создаст отдельный encrypted vault, " +
+                "полностью проверит его и при этом не затронет исходные файлы.",
+                "GeniaFolder — следующий шаг",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
@@ -313,6 +382,21 @@ public partial class MainWindow : Window
             "GeniaFolder",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        double value = bytes;
+        var unit = 0;
+
+        while (value >= 1024 && unit < units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+
+        return $"{value:0.##} {units[unit]}";
     }
 
     private bool TryGetFolder(object sender, out ManagedFolder folder)

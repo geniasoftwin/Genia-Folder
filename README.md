@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.5
+## Current version: 0.2.0-alpha.6
 
 Implemented:
 
@@ -130,3 +130,27 @@ The smoke suite verifies:
 - orphan vault staging from a simulated hard kill is cleaned on the next attempt.
 
 These tests run only in temporary directories and never touch user vaults.
+
+
+## 0.2.0-alpha.6 Vault-only
+
+A verified Standard vault can now be promoted into a real vault-only state.
+
+Before plaintext removal GeniaFolder:
+
+- unlocks the FEK with the folder password;
+- re-verifies the encrypted vault;
+- re-reads the current plaintext tree and requires its file/directory set to match the encrypted manifest;
+- hashes every plaintext file and requires its SHA-256 to match the vault manifest;
+- refuses Vault-only if any file was added, removed, resized or changed after the vault was created.
+
+The destructive transition is crash-aware:
+
+- the protection profile enters `LockPending` before the source directory is atomically renamed into a sibling quarantine;
+- the quarantine is removed only after the verified match;
+- successful completion commits `VaultOnly`;
+- a hard kill can be resumed from `LockPending` without guessing what happened;
+- unlock restores through the same authenticated restore path and then returns the profile to plaintext-present state;
+- an interrupted unlock that already published plaintext can be repaired by byte-for-byte verification rather than overwriting data.
+
+GeniaFolder does not claim physical secure erase of SSD/NVMe blocks. Vault-only removes plaintext from the live filesystem namespace; storage-media remanence is outside this alpha milestone.

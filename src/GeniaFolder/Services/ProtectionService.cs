@@ -62,6 +62,20 @@ public sealed class ProtectionService
         };
     }
 
+    public VaultStorageInfo? GetStorageInfo(Guid folderId)
+    {
+        var profile = LoadProfile(folderId);
+        if (profile is null)
+            return null;
+
+        return new VaultStorageInfo
+        {
+            State = profile.Storage.State,
+            PendingPlaintextPath = profile.Storage.PendingPlaintextPath,
+            VaultOnlyActivatedAt = profile.Storage.VaultOnlyActivatedAt
+        };
+    }
+
     public async Task<UnlockedProtectionSession?> UnlockWithPasswordAsync(
         Guid folderId,
         string password)
@@ -140,6 +154,53 @@ public sealed class ProtectionService
             DirectoryCount = result.DirectoryCount,
             PlaintextBytes = result.PlaintextBytes,
             ManifestCiphertextSha256 = result.ManifestCiphertextSha256
+        };
+
+        await SaveProfileAtomicAsync(profile, overwrite: true);
+    }
+
+    public async Task MarkLockPendingAsync(
+        Guid folderId,
+        string pendingPlaintextPath)
+    {
+        var profile = await LoadProfileAsync(folderId)
+            ?? throw new InvalidOperationException("Профиль защиты не найден.");
+
+        profile.Storage = new VaultStorageInfo
+        {
+            State = VaultStorageState.LockPending,
+            PendingPlaintextPath = pendingPlaintextPath,
+            VaultOnlyActivatedAt = null
+        };
+
+        await SaveProfileAtomicAsync(profile, overwrite: true);
+    }
+
+    public async Task MarkVaultOnlyAsync(Guid folderId)
+    {
+        var profile = await LoadProfileAsync(folderId)
+            ?? throw new InvalidOperationException("Профиль защиты не найден.");
+
+        profile.Storage = new VaultStorageInfo
+        {
+            State = VaultStorageState.VaultOnly,
+            PendingPlaintextPath = string.Empty,
+            VaultOnlyActivatedAt = DateTimeOffset.UtcNow
+        };
+
+        await SaveProfileAtomicAsync(profile, overwrite: true);
+    }
+
+    public async Task MarkPlaintextPresentAsync(Guid folderId)
+    {
+        var profile = await LoadProfileAsync(folderId)
+            ?? throw new InvalidOperationException("Профиль защиты не найден.");
+
+        profile.Storage = new VaultStorageInfo
+        {
+            State = VaultStorageState.PlaintextPresent,
+            PendingPlaintextPath = string.Empty,
+            VaultOnlyActivatedAt = null
         };
 
         await SaveProfileAtomicAsync(profile, overwrite: true);

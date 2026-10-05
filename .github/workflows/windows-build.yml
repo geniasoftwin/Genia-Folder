@@ -12,5 +12,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: Build
-        run: dotnet build src/GeniaFolder/GeniaFolder.csproj -c Release
+      - name: Build solution
+        run: dotnet build GeniaFolder.slnx -c Release
+      - name: Security smoke tests
+        run: dotnet run --project tests/GeniaFolder.SecuritySmokeTests/GeniaFolder.SecuritySmokeTests.csproj -c Release --no-build

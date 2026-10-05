@@ -29,7 +29,7 @@
         </Grid>
 
         <Border Grid.Row="1" Margin="0,24,0,14" Padding="14" CornerRadius="10" Background="#FFF8E1" BorderBrush="#F4D77D" BorderThickness="1">
-            <TextBlock Text="Версия 0.1.7: трей, single-instance и надёжное восстановление уже запущенного окна. Защита паролем появится только вместе с реальным шифрованием." TextWrapping="Wrap" Foreground="#6B5715" />
+            <TextBlock Text="Версия 0.2.0-alpha.1: Standard Protection — FEK, пароль и бумажный Master Recovery Key. Файлы пока не шифруются: ложной защиты не показываем." TextWrapping="Wrap" Foreground="#6B5715" />
         </Border>
 
         <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
@@ -67,7 +67,7 @@
                                             Tag="{Binding Id}"
                                             IsEnabled="{Binding Exists}"
                                             Click="Color_Click" />
-                                    <Button Content="Защита"
+                                    <Button Content="{Binding ProtectionActionLabel}"
                                             Tag="{Binding Id}"
                                             IsEnabled="{Binding Exists}"
                                             Click="Protection_Click" />

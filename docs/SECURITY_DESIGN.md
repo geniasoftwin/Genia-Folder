@@ -28,3 +28,18 @@ First-run recovery will generate a high-entropy offline recovery secret intended
 A simple "three wrong passwords destroys everything" policy can be abused by anyone who can access the machine. Therefore Extreme Mode must be off by default and require explicit acknowledgement. A separate Panic Password is preferred over accidental-trigger destruction.
 
 No developer backdoor or universal recovery key is permitted.
+
+
+## Implemented in 0.2.0-alpha.1
+
+The first protection milestone implements the key hierarchy without touching user files:
+
+- 256-bit random FEK;
+- PBKDF2-HMAC-SHA256 password KEK (600,000 iterations, random salt);
+- AES-256-GCM authenticated wrapping of the FEK;
+- independent 256-bit Master Recovery secret;
+- human-readable `GF1-` recovery code with a checksum for transcription-error detection;
+- atomic profile persistence only after the user confirms the paper Recovery Key;
+- pre-persistence round-trip verification through both password and recovery routes.
+
+A prepared profile is **not** presented as an encrypted folder. File contents remain plaintext until the next protection milestone implements authenticated file encryption and crash-safe migration.

@@ -168,7 +168,7 @@ public partial class App : System.Windows.Application
         openItem.Click += (_, _) => Dispatcher.BeginInvoke(ShowMainWindow);
         menu.Items.Add(openItem);
 
-        var lockAllItem = new Forms.ToolStripMenuItem("Заблокировать всё (в 0.2)")
+        var lockAllItem = new Forms.ToolStripMenuItem("Заблокировать всё (позже)")
         {
             Enabled = false
         };

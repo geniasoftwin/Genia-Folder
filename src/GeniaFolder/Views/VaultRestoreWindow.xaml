@@ -1,0 +1,89 @@
+<Window x:Class="GeniaFolder.Views.VaultRestoreWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Восстановление vault — GeniaFolder"
+        Icon="/GeniaFolder;component/Assets/GeniaFolder.ico"
+        Width="650"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="26">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Восстановить из encrypted vault"
+                   FontSize="22"
+                   FontWeight="SemiBold" />
+
+        <Border Grid.Row="1"
+                Margin="0,12,0,18"
+                Padding="12"
+                Background="#FFF8E1"
+                BorderBrush="#F4D77D"
+                BorderThickness="1"
+                CornerRadius="8">
+            <TextBlock x:Name="InfoText"
+                       TextWrapping="Wrap"
+                       Foreground="#6B5715" />
+        </Border>
+
+        <StackPanel Grid.Row="2">
+            <TextBlock Text="Пароль папки"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,6" />
+            <PasswordBox x:Name="PasswordBox"
+                         MinHeight="36"
+                         Padding="8,0"
+                         VerticalContentAlignment="Center" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Margin="0,16,0,0">
+            <TextBlock Text="Будет создано:"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,6" />
+            <TextBox x:Name="DestinationText"
+                     IsReadOnly="True"
+                     Padding="8,6"
+                     TextWrapping="Wrap" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="4" Margin="0,18,0,0">
+            <ProgressBar x:Name="ProgressBar"
+                         Height="12"
+                         Minimum="0"
+                         Maximum="100"
+                         Value="0" />
+            <TextBlock x:Name="StatusText"
+                       Margin="0,8,0,0"
+                       Text="Готово к восстановлению."
+                       Foreground="#59616D"
+                       TextWrapping="Wrap" />
+            <TextBlock x:Name="ErrorText"
+                       Margin="0,8,0,0"
+                       Foreground="#B42318"
+                       TextWrapping="Wrap" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="5"
+                    Margin="0,22,0,0"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button x:Name="CancelButton"
+                    Content="Отмена"
+                    Padding="16,7"
+                    Margin="0,0,8,0"
+                    Click="Cancel_Click" />
+            <Button x:Name="StartButton"
+                    Content="Восстановить и проверить"
+                    IsDefault="True"
+                    Padding="16,7"
+                    Click="Start_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

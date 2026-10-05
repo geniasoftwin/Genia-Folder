@@ -22,7 +22,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-dotnet build src\GeniaFolder\GeniaFolder.csproj -c Release
+dotnet build GeniaFolder.slnx -c Release
 if errorlevel 1 (
   echo [FAILED] Build failed.
   pause
@@ -30,7 +30,17 @@ if errorlevel 1 (
 )
 
 echo.
-echo [PASS] Build completed.
+echo === GeniaFolder Security Smoke Tests ===
+dotnet run --project tests\GeniaFolder.SecuritySmokeTests\GeniaFolder.SecuritySmokeTests.csproj -c Release --no-build
+if errorlevel 1 (
+  echo.
+  echo [FAILED] Security smoke tests failed. Release output must not be trusted.
+  pause
+  exit /b 1
+)
+
+echo.
+echo [PASS] Build and security smoke tests completed.
 echo Output: src\GeniaFolder\bin\Release\net10.0-windows\GeniaFolder.exe
 start "" "src\GeniaFolder\bin\Release\net10.0-windows"
 pause

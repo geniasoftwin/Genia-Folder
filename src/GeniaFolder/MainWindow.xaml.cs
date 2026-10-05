@@ -114,25 +114,29 @@ public partial class MainWindow : Window
             }
             else
             {
-                status = !exists
-                    ? "Папка не найдена или диск недоступен"
-                    : vaultVerified && vaultAvailable
-                        ? "Зашифрованная копия проверена · оригиналы пока на месте"
-                        : vaultVerified
-                            ? "Vault зарегистрирован, но сейчас не найден · оригиналы пока на месте"
-                            : protectionPrepared
-                                ? "Ключи Standard готовы · файлы пока НЕ зашифрованы"
-                                : folder.ProtectionLabel;
+                status = !exists && vaultVerified && vaultAvailable
+                    ? "Исходная папка отсутствует · encrypted vault доступен для восстановления"
+                    : !exists
+                        ? "Папка не найдена или диск недоступен"
+                        : vaultVerified && vaultAvailable
+                            ? "Зашифрованная копия проверена · оригиналы пока на месте"
+                            : vaultVerified
+                                ? "Vault зарегистрирован, но сейчас не найден · оригиналы пока на месте"
+                                : protectionPrepared
+                                    ? "Ключи Standard готовы · файлы пока НЕ зашифрованы"
+                                    : folder.ProtectionLabel;
 
-                statusBrush = !exists
-                    ? Brushes.Firebrick
-                    : vaultVerified && vaultAvailable
-                        ? Brushes.DarkGreen
-                        : vaultVerified
-                            ? Brushes.Firebrick
-                            : protectionPrepared
-                                ? Brushes.DarkGoldenrod
-                                : Brushes.Gray;
+                statusBrush = !exists && vaultVerified && vaultAvailable
+                    ? Brushes.DarkGoldenrod
+                    : !exists
+                        ? Brushes.Firebrick
+                        : vaultVerified && vaultAvailable
+                            ? Brushes.DarkGreen
+                            : vaultVerified
+                                ? Brushes.Firebrick
+                                : protectionPrepared
+                                    ? Brushes.DarkGoldenrod
+                                    : Brushes.Gray;
 
                 protectionAction = vaultVerified
                     ? "Vault"
@@ -140,8 +144,13 @@ public partial class MainWindow : Window
                         ? "Шифровать"
                         : "Защита";
 
-                protectionEnabled = exists;
-                cardOpacity = exists ? 1.0 : 0.72;
+                protectionEnabled = vaultVerified
+                    ? vaultAvailable
+                    : exists;
+
+                cardOpacity = vaultVerified && vaultAvailable
+                    ? 1.0
+                    : exists ? 1.0 : 0.72;
             }
 
             _rows.Add(new FolderRow(

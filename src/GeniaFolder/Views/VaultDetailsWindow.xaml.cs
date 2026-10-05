@@ -124,11 +124,10 @@ public partial class VaultDetailsWindow : Window
             if (restore.ShowDialog() != true)
                 return;
 
-            if (!existingPlaintext &&
-                restore.Result is not { } restored)
-            {
+            var restored = restore.Result;
+
+            if (!existingPlaintext && restored is null)
                 return;
-            }
 
             try
             {

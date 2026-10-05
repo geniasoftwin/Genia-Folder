@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Encrypted vault — GeniaFolder"
         Icon="/GeniaFolder;component/Assets/GeniaFolder.ico"
-        Width="650"
+        Width="680"
         SizeToContent="Height"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner">
@@ -34,14 +34,15 @@
             </StackPanel>
         </Border>
 
-        <Border Grid.Row="2"
+        <Border x:Name="StateBorder"
+                Grid.Row="2"
                 Margin="0,16,0,0"
                 Padding="12"
                 Background="#EEF8F0"
                 BorderBrush="#A7D7AF"
                 BorderThickness="1"
                 CornerRadius="8">
-            <TextBlock Text="Vault уже прошёл полную криптографическую проверку. Восстановление создаёт новую отдельную папку; исходная папка и сам vault не изменяются."
+            <TextBlock x:Name="StateText"
                        TextWrapping="Wrap"
                        Foreground="#245D2E" />
         </Border>
@@ -56,7 +57,11 @@
                     Margin="0,0,8,0" />
             <Button Content="Восстановить копию…"
                     Padding="16,7"
+                    Margin="0,0,8,0"
                     Click="Restore_Click" />
+            <Button x:Name="StorageActionButton"
+                    Padding="16,7"
+                    Click="StorageAction_Click" />
         </StackPanel>
     </Grid>
 </Window>

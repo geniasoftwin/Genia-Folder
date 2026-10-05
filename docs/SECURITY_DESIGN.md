@@ -87,3 +87,12 @@ Standard Protection now has two tested unlock routes for restore:
 2. paper Master Recovery Key -> recovery KEK -> recovery-wrapped FEK.
 
 After either route unwraps the same FEK, restoration uses the same authenticated manifest, AES-256-GCM chunk verification and plaintext SHA-256 checks. A recovery-key failure stops before any restore output is trusted or published.
+
+
+## Implemented in 0.2.0-alpha.5
+
+Vault-only mode is gated behind automated negative-path testing. CI now runs an isolated security smoke suite with disposable data and profiles.
+
+Required passing scenarios include wrong password rejection, wrong Recovery Key rejection, byte-identical restore through both unlock routes, encrypted manifest corruption rejection, encrypted file corruption rejection, cancellation cleanup, and stale staging cleanup after simulated process death.
+
+A CI failure blocks the security milestone from being treated as releasable.

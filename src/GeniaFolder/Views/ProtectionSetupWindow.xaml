@@ -39,8 +39,9 @@
                        FontWeight="SemiBold"
                        Margin="0,0,0,6" />
             <PasswordBox x:Name="PasswordBox"
-                         MinHeight="34"
-                         Padding="8,4" />
+                         MinHeight="36"
+                         Padding="8,0"
+                         VerticalContentAlignment="Center" />
             <TextBlock Text="Минимум 12 символов. Пароль не сохраняется."
                        Margin="0,5,0,0"
                        FontSize="12"
@@ -52,15 +53,19 @@
                        FontWeight="SemiBold"
                        Margin="0,0,0,6" />
             <PasswordBox x:Name="ConfirmBox"
-                         MinHeight="34"
-                         Padding="8,4" />
+                         MinHeight="36"
+                         Padding="8,0"
+                         VerticalContentAlignment="Center" />
         </StackPanel>
 
         <CheckBox x:Name="AcknowledgeBox"
                   Grid.Row="4"
                   Margin="0,18,0,0"
-                  Content="Я понимаю, что на этом этапе создаются ключи защиты, но файлы в папке пока остаются обычными и незашифрованными."
-                  VerticalContentAlignment="Top" />
+                  VerticalContentAlignment="Top">
+            <TextBlock Text="Я понимаю, что на этом этапе создаются ключи защиты, но файлы в папке пока остаются обычными и незашифрованными."
+                       TextWrapping="Wrap"
+                       Margin="4,0,0,0" />
+        </CheckBox>
 
         <TextBlock x:Name="ErrorText"
                    Grid.Row="5"

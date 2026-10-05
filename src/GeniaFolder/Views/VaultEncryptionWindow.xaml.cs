@@ -13,6 +13,8 @@ public partial class VaultEncryptionWindow : Window
 
     private CancellationTokenSource? _cancellation;
     private bool _running;
+    private bool _cancelRequested;
+    private bool _commitStarted;
 
     public VerifiedVaultResult? Result { get; private set; }
 
@@ -51,6 +53,9 @@ public partial class VaultEncryptionWindow : Window
         }
 
         SetRunning(true);
+        _cancelRequested = false;
+        _commitStarted = false;
+        _cancellation = new CancellationTokenSource();
 
         var password = PasswordBox.Password;
         PasswordBox.Clear();
@@ -66,6 +71,7 @@ public partial class VaultEncryptionWindow : Window
                 password);
 
             password = string.Empty;
+            _cancellation.Token.ThrowIfCancellationRequested();
 
             if (session is null)
             {
@@ -75,8 +81,6 @@ public partial class VaultEncryptionWindow : Window
                 PasswordBox.Focus();
                 return;
             }
-
-            _cancellation = new CancellationTokenSource();
 
             var progress = new Progress<VaultBuildProgress>(
                 UpdateProgress);
@@ -88,6 +92,13 @@ public partial class VaultEncryptionWindow : Window
                     progress,
                     _cancellation.Token));
 
+            _cancellation.Token.ThrowIfCancellationRequested();
+
+            // From this point onward we only commit already-verified metadata.
+            // Do not accept a late cancel that could leave the UI claiming
+            // cancellation after the profile has actually been committed.
+            _commitStarted = true;
+            CancelButton.IsEnabled = false;
             StatusText.Text = "Vault полностью проверен. Сохраняем состояние профиля…";
 
             await _protection.MarkVaultVerifiedAsync(
@@ -98,9 +109,10 @@ public partial class VaultEncryptionWindow : Window
         }
         catch (OperationCanceledException)
         {
+            Result = null;
             ErrorText.Text = string.Empty;
             StatusText.Text =
-                "Операция отменена. Временная зашифрованная копия удаляется; исходные файлы не изменялись.";
+                "Операция отменена. Временный vault очищен; исходные файлы не изменялись.";
             ProgressBar.Value = 0;
             SetRunning(false);
         }
@@ -126,7 +138,13 @@ public partial class VaultEncryptionWindow : Window
     {
         if (_running)
         {
-            StatusText.Text = "Отмена операции…";
+            if (_commitStarted || _cancelRequested)
+                return;
+
+            _cancelRequested = true;
+            CancelButton.IsEnabled = false;
+            StatusText.Text =
+                "Безопасно останавливаем и очищаем временный vault…";
             _cancellation?.Cancel();
             return;
         }
@@ -142,7 +160,14 @@ public partial class VaultEncryptionWindow : Window
             return;
 
         e.Cancel = true;
-        StatusText.Text = "Отмена операции…";
+
+        if (_commitStarted || _cancelRequested)
+            return;
+
+        _cancelRequested = true;
+        CancelButton.IsEnabled = false;
+        StatusText.Text =
+            "Безопасно останавливаем и очищаем временный vault…";
         _cancellation?.Cancel();
     }
 
@@ -151,11 +176,21 @@ public partial class VaultEncryptionWindow : Window
         _running = running;
         PasswordBox.IsEnabled = !running;
         StartButton.IsEnabled = !running;
+        CancelButton.IsEnabled = true;
         CancelButton.Content = running ? "Остановить" : "Отмена";
+
+        if (!running)
+        {
+            _cancelRequested = false;
+            _commitStarted = false;
+        }
     }
 
     private void UpdateProgress(VaultBuildProgress progress)
     {
+        if (_cancelRequested)
+            return;
+
         StatusText.Text =
             $"{progress.Stage}: {progress.ProcessedFiles}/{progress.TotalFiles} файлов" +
             (progress.TotalBytes > 0

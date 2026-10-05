@@ -15,6 +15,7 @@ public sealed class VaultEncryptionService
 
     private const string ManifestFileName = "manifest.gfm";
     private const string DataDirectoryName = "data";
+    private const string RestoreStagingMarkerName = ".geniafolder-restore-staging";
 
     private static readonly byte[] FileMagic = Encoding.ASCII.GetBytes("GFCHNK01");
     private static readonly byte[] ManifestMagic = Encoding.ASCII.GetBytes("GFMETA01");
@@ -898,6 +899,8 @@ public sealed class VaultEncryptionService
         CleanupStaleRestoreStaging(
             destinationParent,
             Path.GetFileName(destinationPath),
+            session.ProfileId,
+            session.FolderId,
             cancellationToken);
 
         var manifestPath = Path.Combine(vaultPath, ManifestFileName);
@@ -925,6 +928,29 @@ public sealed class VaultEncryptionService
         try
         {
             Directory.CreateDirectory(stagingPath);
+
+            var restoreMarkerPath = Path.Combine(
+                stagingPath,
+                RestoreStagingMarkerName);
+
+            await File.WriteAllTextAsync(
+                restoreMarkerPath,
+                BuildRestoreMarker(
+                    session.ProfileId,
+                    session.FolderId),
+                Encoding.UTF8,
+                cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                File.SetAttributes(
+                    restoreMarkerPath,
+                    FileAttributes.Hidden |
+                    FileAttributes.System);
+            }
+            catch
+            {
+            }
 
             foreach (var directory in manifest.Directories
                 .OrderBy(d => GetPathDepth(d.RelativePath)))
@@ -1007,6 +1033,18 @@ public sealed class VaultEncryptionService
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+
+            var restoreMarkerPathForPublish = Path.Combine(
+                stagingPath,
+                RestoreStagingMarkerName);
+
+            if (File.Exists(restoreMarkerPathForPublish))
+            {
+                File.SetAttributes(
+                    restoreMarkerPathForPublish,
+                    FileAttributes.Normal);
+                File.Delete(restoreMarkerPathForPublish);
+            }
 
             Directory.Move(stagingPath, destinationPath);
 
@@ -1543,9 +1581,14 @@ public sealed class VaultEncryptionService
     private static void CleanupStaleRestoreStaging(
         string parent,
         string destinationName,
+        Guid profileId,
+        Guid folderId,
         CancellationToken cancellationToken)
     {
         var prefix = destinationName + ".tmp-";
+        var expectedMarker = BuildRestoreMarker(
+            profileId,
+            folderId);
 
         foreach (var path in Directory.EnumerateDirectories(
             parent,
@@ -1562,9 +1605,42 @@ public sealed class VaultEncryptionService
                 continue;
             }
 
+            var markerPath = Path.Combine(
+                path,
+                RestoreStagingMarkerName);
+
+            if (!File.Exists(markerPath))
+                continue;
+
+            string marker;
+
+            try
+            {
+                marker = File.ReadAllText(
+                    markerPath,
+                    Encoding.UTF8);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (!string.Equals(
+                marker,
+                expectedMarker,
+                StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             TryDeleteStagingDirectorySafely(path);
         }
     }
+
+    private static string BuildRestoreMarker(
+        Guid profileId,
+        Guid folderId) =>
+        $"GeniaFolder.RestoreStaging.v1|{profileId:N}|{folderId:N}";
 
     private static void CleanupStaleStagingDirectories(
         string parent,

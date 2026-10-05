@@ -10,10 +10,13 @@ namespace GeniaFolder.Services;
 public sealed class FolderAppearanceService
 {
     private const uint SHCNE_ATTRIBUTES = 0x00000800;
+    private const uint SHCNE_UPDATEDIR = 0x00001000;
     private const uint SHCNE_UPDATEITEM = 0x00002000;
-    private const uint SHCNF_PATHW = 0x0005;
 
-    private const string IconFileName = ".geniafolder.ico";
+    private const uint SHCNF_PATHW = 0x0005;
+    private const uint SHCNF_FLUSH = 0x1000;
+
+    private const string LegacyIconFileName = ".geniafolder.ico";
     private const string DesktopIniFileName = "desktop.ini";
     private const string LegacyMetadataDirectoryName = ".geniafolder";
 
@@ -22,7 +25,10 @@ public sealed class FolderAppearanceService
         if (!Directory.Exists(folderPath))
             throw new DirectoryNotFoundException(folderPath);
 
-        var iconPath = Path.Combine(folderPath, IconFileName);
+        folderPath = Path.GetFullPath(folderPath);
+
+        var iconFileName = GetIconFileName(color);
+        var iconPath = Path.Combine(folderPath, iconFileName);
         var desktopIniPath = Path.Combine(folderPath, DesktopIniFileName);
 
         PrepareForOverwrite(iconPath);
@@ -31,19 +37,20 @@ public sealed class FolderAppearanceService
         await WriteColorIconAsync(iconPath, GetColor(color));
 
         var ini = "[.ShellClassInfo]\r\n" +
-                  $"IconResource={IconFileName},0\r\n" +
+                  $"IconResource={iconFileName},0\r\n" +
                   "IconIndex=0\r\n" +
                   "ConfirmFileOp=0\r\n";
+
         await File.WriteAllTextAsync(desktopIniPath, ini, Encoding.Unicode);
 
         File.SetAttributes(iconPath, FileAttributes.Hidden | FileAttributes.System);
         File.SetAttributes(desktopIniPath, FileAttributes.Hidden | FileAttributes.System);
 
         PathMakeSystemFolder(folderPath);
+        CleanupLegacyFlatIcon(folderPath);
         CleanupLegacyMetadataDirectory(folderPath);
 
-        SHChangeNotify(SHCNE_ATTRIBUTES, SHCNF_PATHW, folderPath, IntPtr.Zero);
-        SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW, folderPath, IntPtr.Zero);
+        RefreshExplorer(folderPath);
     }
 
     public static Color GetColor(FolderColor color) => color switch
@@ -57,6 +64,27 @@ public sealed class FolderAppearanceService
         _ => Color.FromRgb(120, 124, 132)
     };
 
+    private static string GetIconFileName(FolderColor color) =>
+        $".geniafolder-{color.ToString().ToLowerInvariant()}.ico";
+
+    private static void RefreshExplorer(string folderPath)
+    {
+        var flags = SHCNF_PATHW | SHCNF_FLUSH;
+
+        // The item itself changed (desktop.ini/icon resource).
+        SHChangeNotify(SHCNE_ATTRIBUTES, flags, folderPath, IntPtr.Zero);
+        SHChangeNotify(SHCNE_UPDATEITEM, flags, folderPath, IntPtr.Zero);
+
+        // Explorer often renders a child folder from the parent view, so make
+        // that view refresh immediately as well.
+        var parent = Path.GetDirectoryName(folderPath.TrimEnd(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar));
+
+        if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
+            SHChangeNotify(SHCNE_UPDATEDIR, flags, parent, IntPtr.Zero);
+    }
+
     private static void PrepareForOverwrite(string path)
     {
         if (!File.Exists(path))
@@ -68,6 +96,24 @@ public sealed class FolderAppearanceService
         }
         catch (UnauthorizedAccessException)
         {
+        }
+    }
+
+    private static void CleanupLegacyFlatIcon(string folderPath)
+    {
+        var legacyIcon = Path.Combine(folderPath, LegacyIconFileName);
+        if (!File.Exists(legacyIcon))
+            return;
+
+        try
+        {
+            File.SetAttributes(legacyIcon, FileAttributes.Normal);
+            File.Delete(legacyIcon);
+        }
+        catch
+        {
+            // Cosmetic migration only; never fail a color change because an
+            // old hidden icon cannot be removed immediately.
         }
     }
 
@@ -102,15 +148,18 @@ public sealed class FolderAppearanceService
     private static async Task WriteColorIconAsync(string path, Color color)
     {
         const int size = 64;
+
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
         {
             var body = new SolidColorBrush(color);
             body.Freeze();
+
             var tabColor = Color.FromRgb(
                 (byte)Math.Min(255, color.R + 18),
                 (byte)Math.Min(255, color.G + 18),
                 (byte)Math.Min(255, color.B + 18));
+
             var tab = new SolidColorBrush(tabColor);
             tab.Freeze();
 
@@ -121,6 +170,7 @@ public sealed class FolderAppearanceService
 
         var bitmap = new RenderTargetBitmap(size, size, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(visual);
+
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
 
@@ -130,6 +180,7 @@ public sealed class FolderAppearanceService
 
         await using var output = File.Create(path);
         using var writer = new BinaryWriter(output, Encoding.UTF8, leaveOpen: true);
+
         writer.Write((ushort)0);
         writer.Write((ushort)1);
         writer.Write((ushort)1);
@@ -142,6 +193,7 @@ public sealed class FolderAppearanceService
         writer.Write((uint)pngBytes.Length);
         writer.Write((uint)22);
         writer.Write(pngBytes);
+
         await output.FlushAsync();
     }
 

@@ -20,6 +20,28 @@ internal static class Program
         {
             Console.WriteLine("=== GeniaFolder Security Smoke Tests ===");
 
+            var identityProbe = new FolderIdentityService();
+            var identityOriginal = Path.Combine(root, "identity-original");
+            var identityRenamed = Path.Combine(root, "identity-renamed");
+
+            Directory.CreateDirectory(identityOriginal);
+
+            var beforeRename = identityProbe.TryGetIdentity(
+                identityOriginal)
+                ?? throw new InvalidOperationException(
+                    "Could not capture Windows directory identity.");
+
+            Directory.Move(identityOriginal, identityRenamed);
+
+            Assert(
+                identityProbe.Matches(
+                    identityRenamed,
+                    beforeRename.VolumeSerialNumber,
+                    beforeRename.FileId),
+                "directory identity must survive Explorer-style rename");
+
+            Pass("stable directory identity survives rename");
+
             var source = Path.Combine(root, "source");
             var nested = Path.Combine(source, "nested");
             Directory.CreateDirectory(nested);

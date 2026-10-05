@@ -77,3 +77,13 @@ Restore is now implemented as an isolated verification path:
 - cancellation or failure removes the staging output and does not modify the source plaintext or vault.
 
 This provides an end-to-end encrypt -> verify -> restore -> verify loop before any feature is allowed to remove plaintext source data.
+
+
+## Implemented in 0.2.0-alpha.4
+
+Standard Protection now has two tested unlock routes for restore:
+
+1. password -> PBKDF2-HMAC-SHA256 KEK -> password-wrapped FEK;
+2. paper Master Recovery Key -> recovery KEK -> recovery-wrapped FEK.
+
+After either route unwraps the same FEK, restoration uses the same authenticated manifest, AES-256-GCM chunk verification and plaintext SHA-256 checks. A recovery-key failure stops before any restore output is trusted or published.

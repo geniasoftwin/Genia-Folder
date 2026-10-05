@@ -346,6 +346,43 @@ internal static class Program
 
             Pass("Vault-only unlock restores byte-identical plaintext");
 
+            var unrelatedDirectory = Path.Combine(
+                root,
+                "must-never-be-deleted");
+
+            Directory.CreateDirectory(unrelatedDirectory);
+            await File.WriteAllTextAsync(
+                Path.Combine(unrelatedDirectory, "keep.txt"),
+                "quarantine path tamper guard");
+
+            await protection.MarkLockPendingAsync(
+                folder.Id,
+                unrelatedDirectory);
+
+            using (var passwordSession =
+                await RequirePasswordSessionAsync(protection, folder.Id))
+            {
+                await ExpectInvalidOperationAsync(
+                    "tampered LockPending quarantine path",
+                    async () =>
+                    {
+                        await vaultOnly.ActivateOrResumeAsync(
+                            folder,
+                            vaultInfo,
+                            passwordSession);
+                    });
+            }
+
+            Assert(
+                Directory.Exists(unrelatedDirectory) &&
+                File.Exists(Path.Combine(unrelatedDirectory, "keep.txt")),
+                "tampered LockPending must never delete unrelated data");
+
+            await protection.MarkPlaintextPresentAsync(
+                folder.Id);
+
+            Pass("tampered quarantine path cannot delete unrelated data");
+
             var pendingPath = Path.Combine(
                 root,
                 $".geniafolder-plaintext-{folder.Id:N}.pending-delete-smoke");

@@ -29,7 +29,7 @@
         </Grid>
 
         <Border Grid.Row="1" Margin="0,24,0,14" Padding="14" CornerRadius="10" Background="#FFF8E1" BorderBrush="#F4D77D" BorderThickness="1">
-            <TextBlock Text="Версия 0.2.0-alpha.6: настоящий Vault-only — повторная проверка vault + byte-for-byte сверка plaintext перед удалением, crash-resume и проверенное разблокирование."
+            <TextBlock Text="Версия 0.2.0-alpha.7: GeniaFolder отслеживает обычные переименования папок в Explorer по стабильному Windows file ID и автоматически обновляет путь."
                        TextWrapping="Wrap"
                        Foreground="#6B5715" />
         </Border>

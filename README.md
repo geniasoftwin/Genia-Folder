@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.1
+## Current version: 0.2.0-alpha.2
 
 Implemented:
 
@@ -65,3 +65,22 @@ The future protection layer must not depend on graceful process shutdown for dat
 - sensitive byte buffers are cleared with `CryptographicOperations.ZeroMemory` where practical.
 
 This milestone prepares keys only. Existing user files are not modified or deleted.
+
+
+## 0.2.0-alpha.2 verified encrypted vault
+
+This milestone adds real content encryption without deleting plaintext source data:
+
+- a separate hidden sibling vault is created next to the managed folder;
+- file names and directory layout are stored only inside an encrypted manifest;
+- file contents are encrypted in 1 MiB chunks with AES-256-GCM;
+- each chunk uses a unique nonce and authenticated associated data bound to profile, folder, file and chunk metadata;
+- reparse points/symlinks are rejected rather than followed;
+- GeniaFolder-generated `desktop.ini` and folder-color icon metadata are excluded from user-data encryption;
+- source files are opened read-only and checked for changes during migration;
+- after encryption, every file is fully decrypted in memory and checked against its plaintext SHA-256;
+- the encrypted manifest is authenticated and its ciphertext hash is recorded in the protection profile;
+- staging data is written to a temporary directory and renamed only after full verification;
+- cancellation or failure cleans the staging copy and never modifies source files.
+
+A verified vault is still a **copy** in alpha.2. Plaintext activation/removal is intentionally deferred until restore testing is implemented.

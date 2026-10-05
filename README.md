@@ -1,8 +1,8 @@
 # GeniaFolder
 
-GeniaFolder is a small Windows utility for managing useful folders without replacing Explorer.
+Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.1.6
+## Current version: 0.1.7
 
 Implemented:
 
@@ -17,7 +17,7 @@ Implemented:
 - close with **X** to keep GeniaFolder running in the notification area;
 - double-click the tray icon to restore the window;
 - exit the process explicitly from the tray menu;
-- single-instance protection: starting GeniaFolder again restores the already-running instance instead of creating a duplicate.
+- single-instance protection: starting GeniaFolder again restores the already-running instance instead of creating a duplicate;\n- foreground handoff: a second user-initiated launch grants the running instance permission to restore and raise its existing window.
 
 Password protection is deliberately not faked. It will be introduced only with authenticated encryption, Master Recovery and a crash/force-kill-safe lifecycle.
 

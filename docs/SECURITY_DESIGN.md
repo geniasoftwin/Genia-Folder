@@ -43,3 +43,22 @@ The first protection milestone implements the key hierarchy without touching use
 - pre-persistence round-trip verification through both password and recovery routes.
 
 A prepared profile is **not** presented as an encrypted folder. File contents remain plaintext until the next protection milestone implements authenticated file encryption and crash-safe migration.
+
+
+## Implemented in 0.2.0-alpha.2
+
+The first real content-encryption milestone creates a separate verified vault while leaving source plaintext untouched.
+
+Vault v1 properties:
+
+- encrypted file names are random GUIDs; original names and directory layout live only in the encrypted manifest;
+- file data is chunked at 1 MiB and protected with AES-256-GCM;
+- each chunk has a unique nonce derived from a random per-file prefix plus chunk index;
+- AEAD associated data binds chunks to profile ID, folder ID, file ID, chunk index, original file length and chunk length;
+- the encrypted manifest is also protected by AES-256-GCM and bound to the profile/folder IDs;
+- files are re-read through decryption after creation and SHA-256 checked before the vault is considered verified;
+- reparse points are rejected to avoid traversal/cycle ambiguity;
+- source files are never deleted or rewritten in this milestone;
+- the final vault directory is published only after staging and verification complete.
+
+The next milestone must implement restore/decryption testing before any plaintext source removal can be offered.

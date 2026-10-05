@@ -53,6 +53,14 @@ public sealed class VaultEncryptionService
             parent,
             $".geniafolder-vault-{folder.Id:N}");
 
+        // A hard process kill can leave a staging vault behind because no
+        // finally block gets a chance to run. Clean only our GUID-scoped
+        // staging directories, and refuse to traverse reparse points.
+        CleanupStaleStagingDirectories(
+            parent,
+            folder.Id,
+            cancellationToken);
+
         if (Directory.Exists(finalVaultPath))
         {
             progress?.Report(new VaultBuildProgress(
@@ -175,7 +183,7 @@ public sealed class VaultEncryptionService
         }
         catch
         {
-            TryDeleteDirectory(stagingPath);
+            TryDeleteStagingDirectorySafely(stagingPath);
             throw;
         }
     }
@@ -858,17 +866,72 @@ public sealed class VaultEncryptionService
         }
     }
 
-    private static void TryDeleteDirectory(string path)
+    private static void CleanupStaleStagingDirectories(
+        string parent,
+        Guid folderId,
+        CancellationToken cancellationToken)
+    {
+        var pattern = $".geniafolder-vault-{folderId:N}.tmp-*";
+
+        foreach (var path in Directory.EnumerateDirectories(
+            parent,
+            pattern,
+            SearchOption.TopDirectoryOnly))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            TryDeleteStagingDirectorySafely(path);
+        }
+    }
+
+    private static void TryDeleteStagingDirectorySafely(string path)
     {
         try
         {
             if (!Directory.Exists(path))
                 return;
 
-            foreach (var file in Directory.EnumerateFiles(
-                path,
-                "*",
-                SearchOption.AllDirectories))
+            var rootInfo = new DirectoryInfo(path);
+            if ((rootInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+                return;
+
+            var directories = new List<string> { path };
+            var files = new List<string>();
+            var stack = new Stack<string>();
+            stack.Push(path);
+
+            // First inspect the complete tree. If any reparse point appears,
+            // refuse cleanup rather than risking traversal outside staging.
+            while (stack.Count > 0)
+            {
+                var current = stack.Pop();
+
+                foreach (var directory in Directory.EnumerateDirectories(
+                    current,
+                    "*",
+                    SearchOption.TopDirectoryOnly))
+                {
+                    var info = new DirectoryInfo(directory);
+                    if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+                        return;
+
+                    directories.Add(directory);
+                    stack.Push(directory);
+                }
+
+                foreach (var file in Directory.EnumerateFiles(
+                    current,
+                    "*",
+                    SearchOption.TopDirectoryOnly))
+                {
+                    var info = new FileInfo(file);
+                    if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+                        return;
+
+                    files.Add(file);
+                }
+            }
+
+            foreach (var file in files)
             {
                 try
                 {
@@ -877,13 +940,29 @@ public sealed class VaultEncryptionService
                 catch
                 {
                 }
+
+                File.Delete(file);
             }
 
-            Directory.Delete(path, recursive: true);
+            for (var i = directories.Count - 1; i >= 0; i--)
+            {
+                var directory = directories[i];
+
+                try
+                {
+                    File.SetAttributes(directory, FileAttributes.Normal);
+                }
+                catch
+                {
+                }
+
+                Directory.Delete(directory, recursive: false);
+            }
         }
         catch
         {
-            // A failed staging cleanup never justifies touching source data.
+            // Staging cleanup is best-effort and must never justify touching
+            // source data or an unrelated filesystem location.
         }
     }
 

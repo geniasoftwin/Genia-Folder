@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.3
+## Current version: 0.2.0-alpha.4
 
 Implemented:
 
@@ -100,3 +100,15 @@ The verified encrypted vault can now be restored into a new, separate folder:
 - cancellation/failure cleans the staging restore and leaves the original folder and encrypted vault unchanged.
 
 Plaintext removal is still disabled. The next security milestone should exercise recovery-key restoration and repeated crash/restore tests before activation of a vault-only mode.
+
+
+## 0.2.0-alpha.4 Master Recovery restore
+
+The restore flow now supports two independent FEK unlock paths:
+
+- the normal folder password;
+- the offline paper Master Recovery Key (`GF1-...`).
+
+Both paths unlock the same random FEK and then feed the exact same authenticated restore pipeline. The recovery secret itself is not stored in plaintext by GeniaFolder. An invalid or unrelated recovery key fails before restoration begins.
+
+This milestone verifies that losing the folder password does not make Standard-mode vault data unrecoverable as long as the paper Recovery Key is available.

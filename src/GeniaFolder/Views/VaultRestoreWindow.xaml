@@ -3,12 +3,13 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Восстановление vault — GeniaFolder"
         Icon="/GeniaFolder;component/Assets/GeniaFolder.ico"
-        Width="650"
+        Width="680"
         SizeToContent="Height"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner">
     <Grid Margin="26">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -34,16 +35,54 @@
         </Border>
 
         <StackPanel Grid.Row="2">
-            <TextBlock Text="Пароль папки"
+            <TextBlock Text="Способ разблокировки"
                        FontWeight="SemiBold"
-                       Margin="0,0,0,6" />
-            <PasswordBox x:Name="PasswordBox"
-                         MinHeight="36"
-                         Padding="8,0"
-                         VerticalContentAlignment="Center" />
+                       Margin="0,0,0,8" />
+            <StackPanel Orientation="Horizontal">
+                <RadioButton x:Name="PasswordRadio"
+                             GroupName="UnlockMode"
+                             Content="Пароль"
+                             IsChecked="True"
+                             Margin="0,0,22,0"
+                             Checked="UnlockMode_Checked" />
+                <RadioButton x:Name="RecoveryRadio"
+                             GroupName="UnlockMode"
+                             Content="Master Recovery Key"
+                             Checked="UnlockMode_Checked" />
+            </StackPanel>
         </StackPanel>
 
-        <StackPanel Grid.Row="3" Margin="0,16,0,0">
+        <Grid Grid.Row="3" Margin="0,16,0,0">
+            <StackPanel x:Name="PasswordPanel">
+                <TextBlock Text="Пароль папки"
+                           FontWeight="SemiBold"
+                           Margin="0,0,0,6" />
+                <PasswordBox x:Name="PasswordBox"
+                             MinHeight="36"
+                             Padding="8,0"
+                             VerticalContentAlignment="Center" />
+            </StackPanel>
+
+            <StackPanel x:Name="RecoveryPanel"
+                        Visibility="Collapsed">
+                <TextBlock Text="Master Recovery Key"
+                           FontWeight="SemiBold"
+                           Margin="0,0,0,6" />
+                <TextBox x:Name="RecoveryKeyBox"
+                         MinHeight="36"
+                         Padding="8,0"
+                         VerticalContentAlignment="Center"
+                         FontFamily="Consolas"
+                         TextWrapping="NoWrap" />
+                <TextBlock Text="Введите бумажный ключ GF1-… целиком. Пробелы и дефисы допускаются."
+                           Margin="0,5,0,0"
+                           FontSize="12"
+                           Foreground="#6C7078"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </Grid>
+
+        <StackPanel Grid.Row="4" Margin="0,16,0,0">
             <TextBlock Text="Будет создано:"
                        FontWeight="SemiBold"
                        Margin="0,0,0,6" />
@@ -53,7 +92,7 @@
                      TextWrapping="Wrap" />
         </StackPanel>
 
-        <StackPanel Grid.Row="4" Margin="0,18,0,0">
+        <StackPanel Grid.Row="5" Margin="0,18,0,0">
             <ProgressBar x:Name="ProgressBar"
                          Height="12"
                          Minimum="0"
@@ -70,7 +109,7 @@
                        TextWrapping="Wrap" />
         </StackPanel>
 
-        <StackPanel Grid.Row="5"
+        <StackPanel Grid.Row="6"
                     Margin="0,22,0,0"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right">

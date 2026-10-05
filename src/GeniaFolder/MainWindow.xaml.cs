@@ -20,7 +20,13 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         FolderList.ItemsSource = _rows;
+
         Loaded += async (_, _) => await ReloadAsync();
+
+        // Explorer, removable drives and network locations may change while
+        // GeniaFolder is in the background. Refresh availability whenever the
+        // user returns to the application.
+        Activated += (_, _) => RebuildRows();
     }
 
     private async Task ReloadAsync()
@@ -32,14 +38,20 @@ public partial class MainWindow : Window
     private void RebuildRows()
     {
         _rows.Clear();
+
         foreach (var folder in _folders.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase))
         {
+            var exists = Directory.Exists(folder.Path);
+
             _rows.Add(new FolderRow(
                 folder.Id,
                 folder.Name,
                 folder.Path,
                 new SolidColorBrush(FolderAppearanceService.GetColor(folder.Color)),
-                folder.Exists ? folder.ProtectionLabel : "Папка не найдена"));
+                exists ? folder.ProtectionLabel : "Папка не найдена или диск недоступен",
+                exists,
+                exists ? Brushes.Gray : Brushes.Firebrick,
+                exists ? 1.0 : 0.72));
         }
     }
 
@@ -72,6 +84,7 @@ public partial class MainWindow : Window
     private async Task AddManagedFolderAsync(string path)
     {
         path = Path.GetFullPath(path);
+
         if (_folders.Any(f => string.Equals(Path.GetFullPath(f.Path), path, StringComparison.OrdinalIgnoreCase)))
         {
             MessageBox.Show(this, "Эта папка уже добавлена.", "GeniaFolder", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -100,17 +113,28 @@ public partial class MainWindow : Window
 
     private void Open_Click(object sender, RoutedEventArgs e)
     {
-        if (!TryGetFolder(sender, out var folder)) return;
-        try { ShellService.OpenFolder(folder.Path); }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "GeniaFolder", MessageBoxButton.OK, MessageBoxImage.Error); }
+        if (!TryGetAvailableFolder(sender, out var folder))
+            return;
+
+        try
+        {
+            ShellService.OpenFolder(folder.Path);
+        }
+        catch (Exception ex)
+        {
+            RebuildRows();
+            MessageBox.Show(this, $"Не удалось открыть папку:\n{ex.Message}", "GeniaFolder", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private async void Color_Click(object sender, RoutedEventArgs e)
     {
-        if (!TryGetFolder(sender, out var folder)) return;
+        if (!TryGetAvailableFolder(sender, out var folder))
+            return;
 
         var picker = new ColorPickerWindow(folder.Color) { Owner = this };
-        if (picker.ShowDialog() != true) return;
+        if (picker.ShowDialog() != true)
+            return;
 
         try
         {
@@ -119,15 +143,23 @@ public partial class MainWindow : Window
             await _registry.SaveAsync(_folders);
             RebuildRows();
         }
+        catch (DirectoryNotFoundException)
+        {
+            RebuildRows();
+            ShowFolderUnavailable(folder);
+        }
         catch (Exception ex)
         {
+            RebuildRows();
             MessageBox.Show(this, $"Не удалось изменить цвет:\n{ex.Message}", "GeniaFolder", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
     private void Protection_Click(object sender, RoutedEventArgs e)
     {
-        if (!TryGetFolder(sender, out _)) return;
+        if (!TryGetAvailableFolder(sender, out _))
+            return;
+
         MessageBox.Show(this,
             "Защиту подключим следующим этапом: пароль + шифрование + бумажный Master Recovery Key.\n\nGeniaFolder не будет выдавать обычную папку с UI-паролем за защищённую.",
             "GeniaFolder — защита",
@@ -137,29 +169,71 @@ public partial class MainWindow : Window
 
     private async void Remove_Click(object sender, RoutedEventArgs e)
     {
-        if (!TryGetFolder(sender, out var folder)) return;
+        if (!TryGetFolder(sender, out var folder))
+            return;
+
+        var locationNote = Directory.Exists(folder.Path)
+            ? "Сама папка и её файлы НЕ будут удалены."
+            : "Папка сейчас недоступна. Будет удалена только запись из GeniaFolder.";
 
         var result = MessageBox.Show(this,
-            $"Убрать «{folder.Name}» из GeniaFolder?\n\nСама папка и её файлы НЕ будут удалены.",
+            $"Убрать «{folder.Name}» из GeniaFolder?\n\n{locationNote}",
             "GeniaFolder",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
-        if (result != MessageBoxResult.Yes) return;
+
+        if (result != MessageBoxResult.Yes)
+            return;
 
         _folders.Remove(folder);
         await _registry.SaveAsync(_folders);
         RebuildRows();
     }
 
+    private bool TryGetAvailableFolder(object sender, out ManagedFolder folder)
+    {
+        if (!TryGetFolder(sender, out folder))
+            return false;
+
+        if (Directory.Exists(folder.Path))
+            return true;
+
+        RebuildRows();
+        ShowFolderUnavailable(folder);
+        return false;
+    }
+
+    private void ShowFolderUnavailable(ManagedFolder folder)
+    {
+        MessageBox.Show(this,
+            $"Папка сейчас недоступна:\n{folder.Path}\n\nЕсли это внешний или сетевой диск, подключите его и вернитесь в GeniaFolder — статус обновится автоматически.",
+            "GeniaFolder",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+    }
+
     private bool TryGetFolder(object sender, out ManagedFolder folder)
     {
         folder = null!;
-        if (sender is not Button { Tag: Guid id }) return false;
+
+        if (sender is not Button { Tag: Guid id })
+            return false;
+
         var found = _folders.FirstOrDefault(f => f.Id == id);
-        if (found is null) return false;
+        if (found is null)
+            return false;
+
         folder = found;
         return true;
     }
 
-    private sealed record FolderRow(Guid Id, string Name, string Path, Brush ColorBrush, string Status);
+    private sealed record FolderRow(
+        Guid Id,
+        string Name,
+        string Path,
+        Brush ColorBrush,
+        string Status,
+        bool Exists,
+        Brush StatusBrush,
+        double CardOpacity);
 }

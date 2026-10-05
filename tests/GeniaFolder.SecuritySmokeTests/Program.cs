@@ -309,6 +309,17 @@ internal static class Program
                 Path.Combine(orphanRestoreStaging, "partial.txt"),
                 "simulated interrupted unlock plaintext");
 
+            using (var markerSession =
+                await RequirePasswordSessionAsync(protection, folder.Id))
+            {
+                await File.WriteAllTextAsync(
+                    Path.Combine(
+                        orphanRestoreStaging,
+                        ".geniafolder-restore-staging"),
+                    $"GeniaFolder.RestoreStaging.v1|{markerSession.ProfileId:N}|{markerSession.FolderId:N}",
+                    Encoding.UTF8);
+            }
+
             using (var recoverySession =
                 await protection.UnlockWithRecoveryKeyAsync(
                     folder.Id,

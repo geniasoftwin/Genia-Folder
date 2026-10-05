@@ -62,8 +62,31 @@ public partial class VaultDetailsWindow : Window
         if (dialog.ShowDialog(this) != true)
             return;
 
+        var selectedParent = Path.GetFullPath(dialog.FolderName);
+
+        if (IsSameOrChildPath(selectedParent, _folder.Path))
+        {
+            MessageBox.Show(this,
+                "Папку восстановления нельзя создавать внутри исходной папки. " +
+                "Выберите соседнюю или другую папку.",
+                "GeniaFolder",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        if (IsSameOrChildPath(selectedParent, _vaultInfo.Path))
+        {
+            MessageBox.Show(this,
+                "Папку восстановления нельзя создавать внутри encrypted vault.",
+                "GeniaFolder",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
         var destination = BuildUniqueDestination(
-            dialog.FolderName,
+            selectedParent,
             _folder.Name);
 
         var restore = new VaultRestoreWindow(
@@ -95,6 +118,25 @@ public partial class VaultDetailsWindow : Window
 
         if (answer == MessageBoxResult.Yes)
             ShellService.OpenFolder(result.RestoredPath);
+    }
+
+    private static bool IsSameOrChildPath(
+        string candidate,
+        string root)
+    {
+        var fullCandidate = Path.GetFullPath(candidate)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        var fullRoot = Path.GetFullPath(root)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        return string.Equals(
+                   fullCandidate,
+                   fullRoot,
+                   StringComparison.OrdinalIgnoreCase) ||
+               fullCandidate.StartsWith(
+                   fullRoot + Path.DirectorySeparatorChar,
+                   StringComparison.OrdinalIgnoreCase);
     }
 
     private static string BuildUniqueDestination(

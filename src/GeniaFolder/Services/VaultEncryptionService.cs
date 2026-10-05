@@ -678,6 +678,466 @@ public sealed class VaultEncryptionService
         }
     }
 
+    public async Task<VaultRestoreResult> RestoreVaultAsync(
+        string vaultPath,
+        string destinationPath,
+        UnlockedProtectionSession session,
+        IProgress<VaultBuildProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        vaultPath = Path.GetFullPath(vaultPath);
+        destinationPath = Path.GetFullPath(destinationPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        if (!Directory.Exists(vaultPath))
+            throw new DirectoryNotFoundException(vaultPath);
+
+        if (Directory.Exists(destinationPath) || File.Exists(destinationPath))
+            throw new IOException("Папка восстановления уже существует.");
+
+        var destinationParent = Directory.GetParent(destinationPath)?.FullName;
+        if (string.IsNullOrWhiteSpace(destinationParent) ||
+            !Directory.Exists(destinationParent))
+        {
+            throw new DirectoryNotFoundException(
+                "Родительская папка восстановления недоступна.");
+        }
+
+        var manifestPath = Path.Combine(vaultPath, ManifestFileName);
+        var dataPath = Path.Combine(vaultPath, DataDirectoryName);
+
+        if (!File.Exists(manifestPath) || !Directory.Exists(dataPath))
+            throw new CryptographicException("Структура vault неполна.");
+
+        var manifest = await ReadEncryptedManifestAsync(
+            manifestPath,
+            session,
+            cancellationToken).ConfigureAwait(false);
+
+        if (manifest.FormatVersion != 1 ||
+            manifest.ProfileId != session.ProfileId ||
+            manifest.FolderId != session.FolderId)
+        {
+            throw new CryptographicException("Vault не соответствует профилю защиты.");
+        }
+
+        ValidateRestoreManifest(manifest, destinationPath);
+
+        var stagingPath = destinationPath + ".tmp-" + Guid.NewGuid().ToString("N");
+
+        try
+        {
+            Directory.CreateDirectory(stagingPath);
+
+            foreach (var directory in manifest.Directories
+                .OrderBy(d => GetPathDepth(d.RelativePath)))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var outputDirectory = GetSafeRestorePath(
+                    stagingPath,
+                    directory.RelativePath);
+
+                Directory.CreateDirectory(outputDirectory);
+            }
+
+            var totalBytes = manifest.Files.Sum(f => f.Length);
+            long restoredBytes = 0;
+            var restoredFiles = 0;
+
+            progress?.Report(new VaultBuildProgress(
+                "Восстановление",
+                0,
+                manifest.Files.Count,
+                0,
+                totalBytes));
+
+            foreach (var entry in manifest.Files)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var encryptedPath = Path.Combine(
+                    dataPath,
+                    entry.FileId.ToString("N") + ".gfc");
+
+                var outputPath = GetSafeRestorePath(
+                    stagingPath,
+                    entry.RelativePath);
+
+                var outputParent = Path.GetDirectoryName(outputPath);
+                if (string.IsNullOrWhiteSpace(outputParent))
+                    throw new CryptographicException("Некорректный путь восстановления.");
+
+                Directory.CreateDirectory(outputParent);
+
+                await DecryptFileToPathAsync(
+                    encryptedPath,
+                    outputPath,
+                    entry,
+                    session,
+                    cancellationToken).ConfigureAwait(false);
+
+                restoredFiles++;
+                restoredBytes += entry.Length;
+
+                progress?.Report(new VaultBuildProgress(
+                    "Восстановление",
+                    restoredFiles,
+                    manifest.Files.Count,
+                    restoredBytes,
+                    totalBytes));
+            }
+
+            // Apply directory metadata last so creating child files does not
+            // immediately modify the timestamps we are restoring.
+            foreach (var directory in manifest.Directories
+                .OrderByDescending(d => GetPathDepth(d.RelativePath)))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var outputDirectory = GetSafeRestorePath(
+                    stagingPath,
+                    directory.RelativePath);
+
+                Directory.SetLastWriteTimeUtc(
+                    outputDirectory,
+                    directory.LastWriteTimeUtc);
+
+                TryApplyRestoredAttributes(
+                    outputDirectory,
+                    directory.Attributes,
+                    isDirectory: true);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            Directory.Move(stagingPath, destinationPath);
+
+            return new VaultRestoreResult(
+                destinationPath,
+                manifest.Files.Count,
+                manifest.Directories.Count,
+                totalBytes);
+        }
+        catch
+        {
+            TryDeleteStagingDirectorySafely(stagingPath);
+            throw;
+        }
+    }
+
+    private async Task DecryptFileToPathAsync(
+        string encryptedPath,
+        string outputPath,
+        VaultFileEntry expected,
+        UnlockedProtectionSession session,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(encryptedPath))
+            throw new CryptographicException(
+                $"В vault отсутствует блок файла {expected.FileId:N}.");
+
+        await using var input = new FileStream(
+            encryptedPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            ChunkSize,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+        using var reader = new BinaryReader(input, Encoding.UTF8, leaveOpen: true);
+
+        var magic = reader.ReadBytes(FileMagic.Length);
+        if (!magic.SequenceEqual(FileMagic))
+            throw new CryptographicException("Неверная сигнатура зашифрованного файла.");
+
+        var version = reader.ReadInt32();
+        var chunkSize = reader.ReadInt32();
+        var originalLength = reader.ReadInt64();
+        var fileIdBytes = reader.ReadBytes(16);
+        var noncePrefix = reader.ReadBytes(NoncePrefixSize);
+
+        if (fileIdBytes.Length != 16)
+            throw new CryptographicException("Заголовок зашифрованного файла обрезан.");
+
+        var fileId = new Guid(fileIdBytes);
+
+        if (version != 1 ||
+            chunkSize != ChunkSize ||
+            originalLength != expected.Length ||
+            fileId != expected.FileId ||
+            noncePrefix.Length != NoncePrefixSize)
+        {
+            throw new CryptographicException("Заголовок зашифрованного файла повреждён.");
+        }
+
+        await using var output = new FileStream(
+            outputPath,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            ChunkSize,
+            FileOptions.Asynchronous |
+            FileOptions.SequentialScan |
+            FileOptions.WriteThrough);
+
+        using var aes = new AesGcm(session.KeyMaterial, TagSize);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+
+        var ciphertext = new byte[ChunkSize];
+        var plaintext = new byte[ChunkSize];
+        var tag = new byte[TagSize];
+        var nonce = new byte[NonceSize];
+
+        try
+        {
+            uint chunkIndex = 0;
+            long totalPlaintext = 0;
+
+            while (totalPlaintext < originalLength)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (input.Position >= input.Length)
+                    throw new CryptographicException("Зашифрованный файл обрезан.");
+
+                var length = reader.ReadInt32();
+
+                if (length <= 0 ||
+                    length > ChunkSize ||
+                    totalPlaintext + length > originalLength)
+                {
+                    throw new CryptographicException("Некорректный размер блока vault.");
+                }
+
+                await input.ReadExactlyAsync(
+                    ciphertext.AsMemory(0, length),
+                    cancellationToken).ConfigureAwait(false);
+
+                await input.ReadExactlyAsync(
+                    tag,
+                    cancellationToken).ConfigureAwait(false);
+
+                Buffer.BlockCopy(
+                    noncePrefix,
+                    0,
+                    nonce,
+                    0,
+                    NoncePrefixSize);
+
+                BinaryPrimitives.WriteUInt32BigEndian(
+                    nonce.AsSpan(NoncePrefixSize, 4),
+                    chunkIndex);
+
+                var aad = BuildChunkAssociatedData(
+                    session.ProfileId,
+                    session.FolderId,
+                    fileId,
+                    chunkIndex,
+                    originalLength,
+                    length);
+
+                try
+                {
+                    aes.Decrypt(
+                        nonce,
+                        ciphertext.AsSpan(0, length),
+                        tag,
+                        plaintext.AsSpan(0, length),
+                        aad);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(aad);
+                }
+
+                hash.AppendData(plaintext, 0, length);
+
+                await output.WriteAsync(
+                    plaintext.AsMemory(0, length),
+                    cancellationToken).ConfigureAwait(false);
+
+                CryptographicOperations.ZeroMemory(
+                    plaintext.AsSpan(0, length));
+
+                CryptographicOperations.ZeroMemory(
+                    ciphertext.AsSpan(0, length));
+
+                totalPlaintext += length;
+                chunkIndex++;
+            }
+
+            if (input.Position != input.Length)
+                throw new CryptographicException("В зашифрованном файле обнаружены лишние данные.");
+
+            await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+            output.Flush(flushToDisk: true);
+
+            var actualHash = Convert.ToHexString(hash.GetHashAndReset());
+
+            if (!string.Equals(
+                actualHash,
+                expected.PlaintextSha256,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                throw new CryptographicException(
+                    $"SHA-256 восстановленного файла не совпал: {expected.RelativePath}");
+            }
+        }
+        catch
+        {
+            try
+            {
+                await output.DisposeAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                if (File.Exists(outputPath))
+                {
+                    File.SetAttributes(outputPath, FileAttributes.Normal);
+                    File.Delete(outputPath);
+                }
+            }
+            catch
+            {
+            }
+
+            throw;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(ciphertext);
+            CryptographicOperations.ZeroMemory(plaintext);
+            CryptographicOperations.ZeroMemory(tag);
+            CryptographicOperations.ZeroMemory(nonce);
+            CryptographicOperations.ZeroMemory(noncePrefix);
+            CryptographicOperations.ZeroMemory(magic);
+            CryptographicOperations.ZeroMemory(fileIdBytes);
+        }
+
+        File.SetLastWriteTimeUtc(outputPath, expected.LastWriteTimeUtc);
+        TryApplyRestoredAttributes(
+            outputPath,
+            expected.Attributes,
+            isDirectory: false);
+    }
+
+    private static void ValidateRestoreManifest(
+        VaultManifest manifest,
+        string destinationRoot)
+    {
+        if (manifest.Files.Count > 10_000_000 ||
+            manifest.Directories.Count > 10_000_000)
+        {
+            throw new CryptographicException("Manifest содержит недопустимое число объектов.");
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var directory in manifest.Directories)
+        {
+            var path = GetSafeRestorePath(
+                destinationRoot,
+                directory.RelativePath);
+
+            if (!seen.Add(path))
+                throw new CryptographicException("Manifest содержит дублирующиеся пути.");
+        }
+
+        foreach (var file in manifest.Files)
+        {
+            if (file.Length < 0)
+                throw new CryptographicException("Manifest содержит отрицательный размер файла.");
+
+            var path = GetSafeRestorePath(
+                destinationRoot,
+                file.RelativePath);
+
+            if (!seen.Add(path))
+                throw new CryptographicException("Manifest содержит дублирующиеся пути.");
+        }
+    }
+
+    private static string GetSafeRestorePath(
+        string root,
+        string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath) ||
+            Path.IsPathRooted(relativePath))
+        {
+            throw new CryptographicException("Manifest содержит небезопасный путь.");
+        }
+
+        var segments = relativePath.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.None);
+
+        if (segments.Length == 0 ||
+            segments.Any(segment =>
+                string.IsNullOrWhiteSpace(segment) ||
+                segment is "." or ".." ||
+                segment.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0))
+        {
+            throw new CryptographicException("Manifest содержит небезопасный путь.");
+        }
+
+        var fullRoot = Path.GetFullPath(root)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        var candidate = Path.GetFullPath(
+            Path.Combine(fullRoot, relativePath));
+
+        var requiredPrefix = fullRoot + Path.DirectorySeparatorChar;
+
+        if (!candidate.StartsWith(
+            requiredPrefix,
+            StringComparison.OrdinalIgnoreCase))
+        {
+            throw new CryptographicException("Manifest пытается выйти за пределы папки восстановления.");
+        }
+
+        return candidate;
+    }
+
+    private static int GetPathDepth(string relativePath) =>
+        relativePath.Count(c =>
+            c == Path.DirectorySeparatorChar ||
+            c == Path.AltDirectorySeparatorChar);
+
+    private static void TryApplyRestoredAttributes(
+        string path,
+        FileAttributes sourceAttributes,
+        bool isDirectory)
+    {
+        try
+        {
+            var allowed = sourceAttributes &
+                (FileAttributes.ReadOnly |
+                 FileAttributes.Hidden |
+                 FileAttributes.System |
+                 FileAttributes.Archive);
+
+            if (isDirectory)
+                allowed |= FileAttributes.Directory;
+
+            if (allowed == 0)
+                allowed = FileAttributes.Normal;
+
+            File.SetAttributes(path, allowed);
+        }
+        catch
+        {
+            // Metadata restoration is best effort. Content integrity has
+            // already been cryptographically verified.
+        }
+    }
+
     private static SourceSnapshot EnumerateSource(
         string root,
         CancellationToken cancellationToken)

@@ -37,13 +37,48 @@ public partial class VaultRestoreWindow : Window
 
         InfoText.Text =
             $"GeniaFolder расшифрует «{folder.Name}» в отдельную новую папку. " +
+            "FEK можно разблокировать паролем папки или бумажным Master Recovery Key. " +
             "Каждый AES-GCM блок будет аутентифицирован, а SHA-256 каждого " +
             "восстановленного файла должен совпасть с hash из manifest.";
 
         DestinationText.Text = destinationPath;
 
-        Loaded += (_, _) => PasswordBox.Focus();
+        Loaded += (_, _) => FocusCredentialInput();
         Closing += VaultRestoreWindow_Closing;
+    }
+
+    private void UnlockMode_Checked(object sender, RoutedEventArgs e)
+    {
+        if (PasswordPanel is null || RecoveryPanel is null)
+            return;
+
+        var useRecovery = RecoveryRadio.IsChecked == true;
+
+        PasswordPanel.Visibility = useRecovery
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        RecoveryPanel.Visibility = useRecovery
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        ErrorText.Text = string.Empty;
+
+        if (IsLoaded)
+            FocusCredentialInput();
+    }
+
+    private void FocusCredentialInput()
+    {
+        if (RecoveryRadio.IsChecked == true)
+        {
+            RecoveryKeyBox.Focus();
+            RecoveryKeyBox.SelectAll();
+        }
+        else
+        {
+            PasswordBox.Focus();
+        }
     }
 
     private async void Start_Click(object sender, RoutedEventArgs e)
@@ -53,7 +88,20 @@ public partial class VaultRestoreWindow : Window
 
         ErrorText.Text = string.Empty;
 
-        if (string.IsNullOrEmpty(PasswordBox.Password))
+        var useRecovery = RecoveryRadio.IsChecked == true;
+        var password = PasswordBox.Password;
+        var recoveryKey = RecoveryKeyBox.Text.Trim();
+
+        if (useRecovery)
+        {
+            if (string.IsNullOrWhiteSpace(recoveryKey))
+            {
+                ErrorText.Text = "Введите Master Recovery Key.";
+                RecoveryKeyBox.Focus();
+                return;
+            }
+        }
+        else if (string.IsNullOrEmpty(password))
         {
             ErrorText.Text = "Введите пароль папки.";
             PasswordBox.Focus();
@@ -65,28 +113,39 @@ public partial class VaultRestoreWindow : Window
         _closeAfterCancel = false;
         _cancellation = new CancellationTokenSource();
 
-        var password = PasswordBox.Password;
         PasswordBox.Clear();
+        RecoveryKeyBox.Clear();
 
         UnlockedProtectionSession? session = null;
 
         try
         {
-            StatusText.Text = "Проверка пароля…";
+            StatusText.Text = useRecovery
+                ? "Проверка Master Recovery Key…"
+                : "Проверка пароля…";
 
-            session = await _protection.UnlockWithPasswordAsync(
-                _folder.Id,
-                password);
+            session = useRecovery
+                ? await _protection.UnlockWithRecoveryKeyAsync(
+                    _folder.Id,
+                    recoveryKey)
+                : await _protection.UnlockWithPasswordAsync(
+                    _folder.Id,
+                    password);
 
             password = string.Empty;
+            recoveryKey = string.Empty;
+
             _cancellation.Token.ThrowIfCancellationRequested();
 
             if (session is null)
             {
-                ErrorText.Text = "Неверный пароль.";
+                ErrorText.Text = useRecovery
+                    ? "Master Recovery Key не подходит к этому профилю."
+                    : "Неверный пароль.";
+
                 StatusText.Text = "Восстановление не начиналось.";
                 SetRunning(false);
-                PasswordBox.Focus();
+                FocusCredentialInput();
                 return;
             }
 
@@ -139,6 +198,7 @@ public partial class VaultRestoreWindow : Window
             _cancellation?.Dispose();
             _cancellation = null;
             password = string.Empty;
+            recoveryKey = string.Empty;
         }
     }
 
@@ -182,7 +242,10 @@ public partial class VaultRestoreWindow : Window
     private void SetRunning(bool running)
     {
         _running = running;
+        PasswordRadio.IsEnabled = !running;
+        RecoveryRadio.IsEnabled = !running;
         PasswordBox.IsEnabled = !running;
+        RecoveryKeyBox.IsEnabled = !running;
         StartButton.IsEnabled = !running;
         CancelButton.IsEnabled = true;
         CancelButton.Content = running ? "Остановить" : "Отмена";

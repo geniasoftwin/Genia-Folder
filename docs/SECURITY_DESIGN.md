@@ -96,3 +96,16 @@ Vault-only mode is gated behind automated negative-path testing. CI now runs an 
 Required passing scenarios include wrong password rejection, wrong Recovery Key rejection, byte-identical restore through both unlock routes, encrypted manifest corruption rejection, encrypted file corruption rejection, cancellation cleanup, and stale staging cleanup after simulated process death.
 
 A CI failure blocks the security milestone from being treated as releasable.
+
+
+## Implemented in 0.2.0-alpha.6
+
+Vault-only is now a transactional state rather than a UI label.
+
+The lock transition requires both the encrypted vault and the current plaintext source to pass verification. Plaintext file paths, lengths and SHA-256 hashes must match the authenticated manifest before any destructive action is permitted.
+
+Storage state is persisted as `PlaintextPresent`, `LockPending` or `VaultOnly`. The source directory is atomically renamed into a GUID-scoped sibling quarantine after the profile records `LockPending`. A process death can therefore be resumed deterministically: source present, quarantine present, or both absent each have an explicit recovery path; simultaneous source+quarantine is treated as an inconsistency and automatic deletion stops.
+
+Unlock uses the existing authenticated restore pipeline. If the process dies after restored plaintext has been published but before the profile state is updated, GeniaFolder can verify the existing plaintext against the vault and complete the state transition without overwriting it.
+
+CI now also rejects stale-vault deletion, verifies Vault-only plaintext removal, verifies byte-identical unlock, exercises marked restore-staging cleanup, and resumes a simulated LockPending hard-kill state.

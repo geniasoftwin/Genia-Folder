@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.4
+## Current version: 0.2.0-alpha.5
 
 Implemented:
 
@@ -112,3 +112,21 @@ The restore flow now supports two independent FEK unlock paths:
 Both paths unlock the same random FEK and then feed the exact same authenticated restore pipeline. The recovery secret itself is not stored in plaintext by GeniaFolder. An invalid or unrelated recovery key fails before restoration begins.
 
 This milestone verifies that losing the folder password does not make Standard-mode vault data unrecoverable as long as the paper Recovery Key is available.
+
+
+## 0.2.0-alpha.5 security gate
+
+A package-free security smoke-test runner is now part of the Windows CI pipeline. Every push builds the complete solution and exercises disposable vaults before CI can pass.
+
+The smoke suite verifies:
+
+- a wrong password cannot unlock the FEK;
+- a modified/wrong Master Recovery Key cannot unlock the FEK;
+- a normal password restore matches source files byte-for-byte;
+- a Master Recovery restore matches source files byte-for-byte;
+- a corrupted encrypted manifest is rejected;
+- a corrupted encrypted file is rejected;
+- a cancelled restore does not publish plaintext and cleans staging output;
+- orphan vault staging from a simulated hard kill is cleaned on the next attempt.
+
+These tests run only in temporary directories and never touch user vaults.

@@ -12,6 +12,7 @@ public partial class VaultRestoreWindow : Window
     private readonly string _destinationPath;
     private readonly ProtectionService _protection;
     private readonly VaultEncryptionService _vault;
+    private readonly bool _verifyExistingPlaintextOnly;
 
     private CancellationTokenSource? _cancellation;
     private bool _running;
@@ -25,7 +26,8 @@ public partial class VaultRestoreWindow : Window
         string vaultPath,
         string destinationPath,
         ProtectionService protection,
-        VaultEncryptionService vault)
+        VaultEncryptionService vault,
+        bool verifyExistingPlaintextOnly = false)
     {
         InitializeComponent();
 
@@ -34,14 +36,22 @@ public partial class VaultRestoreWindow : Window
         _destinationPath = destinationPath;
         _protection = protection;
         _vault = vault;
+        _verifyExistingPlaintextOnly = verifyExistingPlaintextOnly;
 
-        InfoText.Text =
-            $"GeniaFolder расшифрует «{folder.Name}» в отдельную новую папку. " +
-            "FEK можно разблокировать паролем папки или бумажным Master Recovery Key. " +
-            "Каждый AES-GCM блок будет аутентифицирован, а SHA-256 каждого " +
-            "восстановленного файла должен совпасть с hash из manifest.";
+        InfoText.Text = verifyExistingPlaintextOnly
+            ? $"GeniaFolder не будет изменять «{folder.Name}». Существующая plaintext-папка будет byte-for-byte сверена с encrypted vault. Если все SHA-256 совпадут, профиль безопасно завершит прерванную разблокировку."
+            : $"GeniaFolder расшифрует «{folder.Name}» в отдельную новую папку. " +
+              "FEK можно разблокировать паролем папки или бумажным Master Recovery Key. " +
+              "Каждый AES-GCM блок будет аутентифицирован, а SHA-256 каждого " +
+              "восстановленного файла должен совпасть с hash из manifest.";
 
         DestinationText.Text = destinationPath;
+
+        if (verifyExistingPlaintextOnly)
+        {
+            StartButton.Content = "Проверить и завершить разблокировку";
+            StatusText.Text = "Готово к проверке существующей plaintext-папки.";
+        }
 
         Loaded += (_, _) => FocusCredentialInput();
         Closing += VaultRestoreWindow_Closing;
@@ -150,6 +160,29 @@ public partial class VaultRestoreWindow : Window
             }
 
             var progress = new Progress<VaultBuildProgress>(UpdateProgress);
+
+            if (_verifyExistingPlaintextOnly)
+            {
+                if (!Directory.Exists(_destinationPath))
+                {
+                    throw new DirectoryNotFoundException(
+                        "Существующая plaintext-папка не найдена.");
+                }
+
+                await Task.Run(
+                    () => _vault.VerifySourceMatchesVaultAsync(
+                        _folder,
+                        _vaultPath,
+                        session,
+                        progress,
+                        _cancellation.Token));
+
+                _cancellation.Token.ThrowIfCancellationRequested();
+
+                SetRunning(false);
+                DialogResult = true;
+                return;
+            }
 
             Result = await Task.Run(
                 () => _vault.RestoreVaultAsync(

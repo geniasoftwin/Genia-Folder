@@ -1,7 +1,6 @@
 <Application x:Class="GeniaFolder.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             StartupUri="MainWindow.xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Application.Resources>
         <SolidColorBrush x:Key="WindowBackground" Color="#F6F7F9" />
         <SolidColorBrush x:Key="CardBackground" Color="#FFFFFF" />

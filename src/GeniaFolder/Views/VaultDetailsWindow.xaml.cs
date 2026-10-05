@@ -75,16 +75,32 @@ public partial class VaultDetailsWindow : Window
                 break;
 
             default:
-                StateBorder.Background = new SolidColorBrush(
-                    Color.FromRgb(0xEE, 0xF8, 0xF0));
-                StateBorder.BorderBrush = new SolidColorBrush(
-                    Color.FromRgb(0xA7, 0xD7, 0xAF));
-                StateText.Foreground = new SolidColorBrush(
-                    Color.FromRgb(0x24, 0x5D, 0x2E));
+                if (Directory.Exists(_folder.Path))
+                {
+                    StateBorder.Background = new SolidColorBrush(
+                        Color.FromRgb(0xEE, 0xF8, 0xF0));
+                    StateBorder.BorderBrush = new SolidColorBrush(
+                        Color.FromRgb(0xA7, 0xD7, 0xAF));
+                    StateText.Foreground = new SolidColorBrush(
+                        Color.FromRgb(0x24, 0x5D, 0x2E));
 
-                StateText.Text =
-                    "Vault прошёл полную криптографическую проверку, но plaintext пока существует. Можно восстановить отдельную копию или перевести папку в настоящий Vault-only.";
-                StorageActionButton.Content = "Заблокировать папку";
+                    StateText.Text =
+                        "Vault прошёл полную криптографическую проверку, но plaintext пока существует. Можно восстановить отдельную копию или перевести папку в настоящий Vault-only.";
+                    StorageActionButton.Content = "Заблокировать папку";
+                }
+                else
+                {
+                    StateBorder.Background = new SolidColorBrush(
+                        Color.FromRgb(0xFF, 0xF8, 0xE1));
+                    StateBorder.BorderBrush = new SolidColorBrush(
+                        Color.FromRgb(0xF4, 0xD7, 0x7D));
+                    StateText.Foreground = new SolidColorBrush(
+                        Color.FromRgb(0x6B, 0x57, 0x15));
+
+                    StateText.Text =
+                        "Исходная plaintext-папка отсутствует, но encrypted vault доступен. GeniaFolder может безопасно восстановить исходный путь.";
+                    StorageActionButton.Content = "Восстановить исходную папку";
+                }
                 break;
         }
     }
@@ -162,6 +178,56 @@ public partial class VaultDetailsWindow : Window
                     ex.Message +
                     "\n\nНе удаляйте эту папку. Повторно откройте Vault: GeniaFolder сможет byte-for-byte сверить её и завершить разблокировку.",
                     "GeniaFolder — требуется проверка",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+
+            return;
+        }
+
+        if (storage.State == VaultStorageState.PlaintextPresent &&
+            !Directory.Exists(_folder.Path))
+        {
+            var restoreOriginal = new VaultRestoreWindow(
+                _folder,
+                _vaultInfo.Path,
+                _folder.Path,
+                _protection,
+                _vault)
+            {
+                Owner = this
+            };
+
+            if (restoreOriginal.ShowDialog() != true ||
+                restoreOriginal.Result is not { } restoredOriginal)
+            {
+                return;
+            }
+
+            try
+            {
+                var appearance = new FolderAppearanceService();
+                await appearance.ApplyColorAsync(
+                    _folder.Path,
+                    _folder.Color);
+
+                MessageBox.Show(this,
+                    "Исходная папка восстановлена из проверенного encrypted vault.\n\n" +
+                    $"Файлов: {restoredOriginal.FileCount}\n" +
+                    $"Объём: {FormatBytes(restoredOriginal.PlaintextBytes)}\n" +
+                    $"Путь: {restoredOriginal.RestoredPath}",
+                    "GeniaFolder — исходная папка восстановлена",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+
+                DialogResult = true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this,
+                    "Данные восстановлены, но не удалось применить цвет папки:\n" +
+                    ex.Message,
+                    "GeniaFolder",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
             }

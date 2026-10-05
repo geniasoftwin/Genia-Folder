@@ -34,6 +34,74 @@ public sealed class ProtectionService
     public bool HasPreparedProfile(Guid folderId) =>
         File.Exists(GetProfilePath(folderId));
 
+    public VaultCopyInfo? GetVaultInfo(Guid folderId)
+    {
+        var profile = LoadProfile(folderId);
+        if (profile is null)
+            return null;
+
+        return new VaultCopyInfo
+        {
+            State = profile.Vault.State,
+            Path = profile.Vault.Path,
+            VerifiedAt = profile.Vault.VerifiedAt,
+            FileCount = profile.Vault.FileCount,
+            DirectoryCount = profile.Vault.DirectoryCount,
+            PlaintextBytes = profile.Vault.PlaintextBytes,
+            ManifestCiphertextSha256 = profile.Vault.ManifestCiphertextSha256
+        };
+    }
+
+    public async Task<UnlockedProtectionSession?> UnlockWithPasswordAsync(
+        Guid folderId,
+        string password)
+    {
+        var profile = await LoadProfileAsync(folderId);
+        if (profile is null)
+            return null;
+
+        try
+        {
+            var fek = UnwrapWithPassword(profile, password);
+
+            if (fek.Length != FekSize)
+            {
+                CryptographicOperations.ZeroMemory(fek);
+                throw new CryptographicException("Некорректный FEK.");
+            }
+
+            return new UnlockedProtectionSession(
+                profile.ProfileId,
+                profile.FolderId,
+                fek);
+        }
+        catch (CryptographicException)
+        {
+            return null;
+        }
+    }
+
+    public async Task MarkVaultVerifiedAsync(
+        Guid folderId,
+        VerifiedVaultResult result)
+    {
+        var profile = await LoadProfileAsync(folderId)
+            ?? throw new InvalidOperationException("Профиль защиты не найден.");
+
+        profile.Vault = new VaultCopyInfo
+        {
+            State = VaultCopyState.VerifiedCopy,
+            Path = result.VaultPath,
+            VerifiedAt = DateTimeOffset.UtcNow,
+            FileCount = result.FileCount,
+            DirectoryCount = result.DirectoryCount,
+            PlaintextBytes = result.PlaintextBytes,
+            ManifestCiphertextSha256 = result.ManifestCiphertextSha256
+        };
+
+        await SaveProfileAtomicAsync(profile, overwrite: true);
+    }
+
     public PreparedProtectionProfile PrepareStandardProfile(
         ManagedFolder folder,
         string password)
@@ -129,33 +197,10 @@ public sealed class ProtectionService
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        var path = GetProfilePath(profile.FolderId);
-        if (File.Exists(path))
+        if (File.Exists(GetProfilePath(profile.FolderId)))
             throw new InvalidOperationException("Профиль защиты уже существует.");
 
-        var temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
-
-        try
-        {
-            await using (var stream = new FileStream(
-                temp,
-                FileMode.CreateNew,
-                FileAccess.Write,
-                FileShare.None,
-                4096,
-                FileOptions.WriteThrough))
-            {
-                await JsonSerializer.SerializeAsync(stream, profile, _jsonOptions);
-                await stream.FlushAsync();
-            }
-
-            File.Move(temp, path, false);
-        }
-        finally
-        {
-            if (File.Exists(temp))
-                File.Delete(temp);
-        }
+        await SaveProfileAtomicAsync(profile, overwrite: false);
     }
 
     public async Task<bool> VerifyPasswordAsync(Guid folderId, string password)
@@ -221,6 +266,18 @@ public sealed class ProtectionService
         return profile is null ? string.Empty : GetProfileFingerprint(profile);
     }
 
+    private ProtectionProfile? LoadProfile(Guid folderId)
+    {
+        var path = GetProfilePath(folderId);
+        if (!File.Exists(path))
+            return null;
+
+        using var stream = File.OpenRead(path);
+        return JsonSerializer.Deserialize<ProtectionProfile>(
+            stream,
+            _jsonOptions);
+    }
+
     private async Task<ProtectionProfile?> LoadProfileAsync(Guid folderId)
     {
         var path = GetProfilePath(folderId);
@@ -231,6 +288,41 @@ public sealed class ProtectionService
         return await JsonSerializer.DeserializeAsync<ProtectionProfile>(
             stream,
             _jsonOptions);
+    }
+
+    private async Task SaveProfileAtomicAsync(
+        ProtectionProfile profile,
+        bool overwrite)
+    {
+        var path = GetProfilePath(profile.FolderId);
+        var temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
+
+        try
+        {
+            await using (var stream = new FileStream(
+                temp,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                4096,
+                FileOptions.WriteThrough))
+            {
+                await JsonSerializer.SerializeAsync(
+                    stream,
+                    profile,
+                    _jsonOptions);
+
+                await stream.FlushAsync();
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(temp, path, overwrite);
+        }
+        finally
+        {
+            if (File.Exists(temp))
+                File.Delete(temp);
+        }
     }
 
     private static void VerifyPreparedProfile(
@@ -599,3 +691,42 @@ public sealed record PreparedProtectionProfile(
     ProtectionProfile Profile,
     string RecoveryKey,
     string Fingerprint);
+
+
+public sealed class UnlockedProtectionSession : IDisposable
+{
+    private byte[] _keyMaterial;
+    private bool _disposed;
+
+    public Guid ProfileId { get; }
+    public Guid FolderId { get; }
+
+    internal byte[] KeyMaterial
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _keyMaterial;
+        }
+    }
+
+    internal UnlockedProtectionSession(
+        Guid profileId,
+        Guid folderId,
+        byte[] keyMaterial)
+    {
+        ProfileId = profileId;
+        FolderId = folderId;
+        _keyMaterial = keyMaterial;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        CryptographicOperations.ZeroMemory(_keyMaterial);
+        _keyMaterial = [];
+        _disposed = true;
+    }
+}

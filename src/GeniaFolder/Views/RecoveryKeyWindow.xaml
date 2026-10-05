@@ -1,0 +1,87 @@
+<Window x:Class="GeniaFolder.Views.RecoveryKeyWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Master Recovery Key — GeniaFolder"
+        Icon="/GeniaFolder;component/Assets/GeniaFolder.ico"
+        Width="680"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="26">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Master Recovery Key"
+                   FontSize="22"
+                   FontWeight="SemiBold" />
+
+        <TextBlock x:Name="DescriptionText"
+                   Grid.Row="1"
+                   Margin="0,8,0,16"
+                   TextWrapping="Wrap"
+                   Foreground="#59616D" />
+
+        <Border Grid.Row="2"
+                Padding="14"
+                Background="#F3F5F8"
+                CornerRadius="8">
+            <TextBox x:Name="RecoveryKeyText"
+                     IsReadOnly="True"
+                     BorderThickness="0"
+                     Background="Transparent"
+                     FontFamily="Consolas"
+                     FontSize="16"
+                     FontWeight="SemiBold"
+                     TextWrapping="Wrap"
+                     HorizontalContentAlignment="Center" />
+        </Border>
+
+        <TextBlock x:Name="FingerprintText"
+                   Grid.Row="3"
+                   Margin="0,10,0,0"
+                   HorizontalAlignment="Center"
+                   Foreground="#6C7078" />
+
+        <Border Grid.Row="4"
+                Margin="0,18,0,0"
+                Padding="12"
+                Background="#FDECEC"
+                BorderBrush="#F1A7A7"
+                BorderThickness="1"
+                CornerRadius="8">
+            <StackPanel>
+                <TextBlock Text="Запишите этот ключ на бумагу и храните отдельно от компьютера."
+                           FontWeight="SemiBold"
+                           TextWrapping="Wrap" />
+                <TextBlock Margin="0,5,0,0"
+                           Text="GeniaFolder не сохраняет Recovery Key в открытом виде и не сможет показать его повторно."
+                           TextWrapping="Wrap" />
+                <CheckBox x:Name="SavedBox"
+                          Margin="0,12,0,0"
+                          Content="Я записал Master Recovery Key и проверил запись." />
+            </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="5"
+                    Margin="0,22,0,0"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="Отмена"
+                    IsCancel="True"
+                    Padding="16,7"
+                    Margin="0,0,8,0" />
+            <Button x:Name="ContinueButton"
+                    Content="Ключ записан — сохранить профиль"
+                    IsDefault="True"
+                    IsEnabled="False"
+                    Padding="16,7"
+                    Click="Continue_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

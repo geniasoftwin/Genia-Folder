@@ -895,6 +895,11 @@ public sealed class VaultEncryptionService
                 "Родительская папка восстановления недоступна.");
         }
 
+        CleanupStaleRestoreStaging(
+            destinationParent,
+            Path.GetFileName(destinationPath),
+            cancellationToken);
+
         var manifestPath = Path.Combine(vaultPath, ManifestFileName);
         var dataPath = Path.Combine(vaultPath, DataDirectoryName);
 
@@ -1532,6 +1537,32 @@ public sealed class VaultEncryptionService
         finally
         {
             CryptographicOperations.ZeroMemory(buffer);
+        }
+    }
+
+    private static void CleanupStaleRestoreStaging(
+        string parent,
+        string destinationName,
+        CancellationToken cancellationToken)
+    {
+        var prefix = destinationName + ".tmp-";
+
+        foreach (var path in Directory.EnumerateDirectories(
+            parent,
+            "*",
+            SearchOption.TopDirectoryOnly))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var name = Path.GetFileName(path);
+            if (!name.StartsWith(
+                prefix,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            TryDeleteStagingDirectorySafely(path);
         }
     }
 

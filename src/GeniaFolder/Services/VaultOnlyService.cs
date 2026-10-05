@@ -133,6 +133,10 @@ public sealed class VaultOnlyService
     {
         var sourceExists = Directory.Exists(folder.Path);
         var pendingPath = storage.PendingPlaintextPath;
+
+        if (!string.IsNullOrWhiteSpace(pendingPath))
+            ValidatePendingPath(folder, pendingPath);
+
         var pendingExists =
             !string.IsNullOrWhiteSpace(pendingPath) &&
             Directory.Exists(pendingPath);
@@ -198,6 +202,58 @@ public sealed class VaultOnlyService
         // deletion completed, but profile commit did not.
         await _protection.MarkVaultOnlyAsync(
             folder.Id).ConfigureAwait(false);
+    }
+
+    private static void ValidatePendingPath(
+        ManagedFolder folder,
+        string pendingPath)
+    {
+        var sourceRoot = Path.GetFullPath(folder.Path)
+            .TrimEnd(
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar);
+
+        var parent = Directory.GetParent(sourceRoot)?.FullName
+            ?? throw new InvalidOperationException(
+                "Не удалось определить родительскую папку.");
+
+        var fullParent = Path.GetFullPath(parent)
+            .TrimEnd(
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar);
+
+        var fullPending = Path.GetFullPath(pendingPath)
+            .TrimEnd(
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar);
+
+        var pendingParent = Directory.GetParent(fullPending)?.FullName;
+
+        if (string.IsNullOrWhiteSpace(pendingParent) ||
+            !string.Equals(
+                Path.GetFullPath(pendingParent)
+                    .TrimEnd(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar),
+                fullParent,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "LockPending содержит небезопасный путь quarantine.");
+        }
+
+        var expectedPrefix =
+            $".geniafolder-plaintext-{folder.Id:N}.pending-delete-";
+
+        var pendingName = Path.GetFileName(fullPending);
+
+        if (!pendingName.StartsWith(
+            expectedPrefix,
+            StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "LockPending quarantine не принадлежит этой папке.");
+        }
     }
 
     private static void TryHidePendingDirectory(string path)

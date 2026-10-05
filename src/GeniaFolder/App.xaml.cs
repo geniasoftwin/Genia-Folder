@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -10,6 +11,7 @@ public partial class App : System.Windows.Application
 {
     private const string MutexName = @"Local\GeniaFolder.SingleInstance";
     private const string ActivateEventName = @"Local\GeniaFolder.ActivateExisting";
+    private const int SW_RESTORE = 9;
 
     private Mutex? _instanceMutex;
     private bool _ownsMutex;
@@ -37,6 +39,7 @@ public partial class App : System.Windows.Application
 
         if (!_ownsMutex)
         {
+            GrantForegroundPermissionToRunningInstance();
             SignalRunningInstance();
             Shutdown();
             return;
@@ -79,15 +82,21 @@ public partial class App : System.Windows.Application
         if (!MainWindow.IsVisible)
             MainWindow.Show();
 
+        MainWindow.ShowInTaskbar = true;
+
         if (MainWindow.WindowState == System.Windows.WindowState.Minimized)
             MainWindow.WindowState = System.Windows.WindowState.Normal;
 
-        MainWindow.ShowInTaskbar = true;
-        MainWindow.Activate();
+        var handle = new WindowInteropHelper(MainWindow).EnsureHandle();
 
-        var handle = new WindowInteropHelper(MainWindow).Handle;
-        if (handle != IntPtr.Zero)
-            SetForegroundWindow(handle);
+        // Restore first, then request foreground. The second GeniaFolder
+        // process explicitly grants this process foreground permission before
+        // signalling us, so a user-initiated second launch should raise the
+        // existing window instead of only flashing on the taskbar.
+        ShowWindow(handle, SW_RESTORE);
+        MainWindow.Activate();
+        ForceForegroundWindow(handle);
+        MainWindow.Focus();
     }
 
     internal void NotifyHiddenToTray()
@@ -201,6 +210,36 @@ public partial class App : System.Windows.Application
         return SystemIcons.Application;
     }
 
+    private static void GrantForegroundPermissionToRunningInstance()
+    {
+        Process[] candidates = [];
+
+        try
+        {
+            candidates = Process.GetProcessesByName("GeniaFolder");
+            var currentId = Environment.ProcessId;
+
+            foreach (var process in candidates)
+            {
+                if (process.Id == currentId || process.HasExited)
+                    continue;
+
+                AllowSetForegroundWindow((uint)process.Id);
+                return;
+            }
+        }
+        catch
+        {
+            // Activation event still works if Windows refuses or process
+            // enumeration is temporarily unavailable.
+        }
+        finally
+        {
+            foreach (var process in candidates)
+                process.Dispose();
+        }
+    }
+
     private static void SignalRunningInstance()
     {
         // The first process may still be creating its activation event.
@@ -220,7 +259,74 @@ public partial class App : System.Windows.Application
         }
     }
 
+    private static void ForceForegroundWindow(IntPtr handle)
+    {
+        BringWindowToTop(handle);
+
+        if (SetForegroundWindow(handle))
+            return;
+
+        var foregroundWindow = GetForegroundWindow();
+        if (foregroundWindow == IntPtr.Zero)
+            return;
+
+        var currentThreadId = GetCurrentThreadId();
+        var foregroundThreadId = GetWindowThreadProcessId(foregroundWindow, out _);
+
+        if (foregroundThreadId == 0)
+            return;
+
+        if (foregroundThreadId == currentThreadId)
+        {
+            SetActiveWindow(handle);
+            SetForegroundWindow(handle);
+            return;
+        }
+
+        if (!AttachThreadInput(currentThreadId, foregroundThreadId, true))
+            return;
+
+        try
+        {
+            BringWindowToTop(handle);
+            SetActiveWindow(handle);
+            SetForegroundWindow(handle);
+        }
+        finally
+        {
+            AttachThreadInput(currentThreadId, foregroundThreadId, false);
+        }
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AllowSetForegroundWindow(uint dwProcessId);
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetActiveWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 }

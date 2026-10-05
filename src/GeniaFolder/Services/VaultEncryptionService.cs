@@ -678,6 +678,192 @@ public sealed class VaultEncryptionService
         }
     }
 
+    public async Task VerifySourceMatchesVaultAsync(
+        ManagedFolder folder,
+        string vaultPath,
+        UnlockedProtectionSession session,
+        IProgress<VaultBuildProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+        ArgumentNullException.ThrowIfNull(session);
+
+        var sourceRoot = Path.GetFullPath(folder.Path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        if (!Directory.Exists(sourceRoot))
+            throw new DirectoryNotFoundException(sourceRoot);
+
+        var manifestPath = Path.Combine(vaultPath, ManifestFileName);
+        if (!File.Exists(manifestPath))
+            throw new CryptographicException("Manifest vault не найден.");
+
+        var manifest = await ReadEncryptedManifestAsync(
+            manifestPath,
+            session,
+            cancellationToken).ConfigureAwait(false);
+
+        if (manifest.FormatVersion != 1 ||
+            manifest.ProfileId != session.ProfileId ||
+            manifest.FolderId != session.FolderId)
+        {
+            throw new CryptographicException("Vault не соответствует профилю защиты.");
+        }
+
+        var source = EnumerateSource(sourceRoot, cancellationToken);
+
+        if (source.Files.Count != manifest.Files.Count ||
+            source.Directories.Count != manifest.Directories.Count)
+        {
+            throw new InvalidOperationException(
+                "Исходная папка изменилась после создания vault: набор файлов или папок не совпадает.");
+        }
+
+        var sourceDirectories = source.Directories
+            .Select(d => d.RelativePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var directory in manifest.Directories)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!sourceDirectories.Contains(directory.RelativePath))
+            {
+                throw new InvalidOperationException(
+                    $"Исходная папка изменилась: отсутствует каталог «{directory.RelativePath}».");
+            }
+        }
+
+        var sourceFiles = source.Files.ToDictionary(
+            f => f.RelativePath,
+            StringComparer.OrdinalIgnoreCase);
+
+        long checkedBytes = 0;
+        var checkedFiles = 0;
+        var totalBytes = manifest.Files.Sum(f => f.Length);
+
+        progress?.Report(new VaultBuildProgress(
+            "Сверка исходной папки",
+            0,
+            manifest.Files.Count,
+            0,
+            totalBytes));
+
+        foreach (var entry in manifest.Files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!sourceFiles.TryGetValue(
+                entry.RelativePath,
+                out var sourceFile))
+            {
+                throw new InvalidOperationException(
+                    $"Исходная папка изменилась: отсутствует файл «{entry.RelativePath}».");
+            }
+
+            if (sourceFile.Length != entry.Length)
+            {
+                throw new InvalidOperationException(
+                    $"Исходная папка изменилась: размер файла «{entry.RelativePath}» не совпадает с vault.");
+            }
+
+            var actualHash = await ComputeFileSha256Async(
+                sourceFile.FullPath,
+                cancellationToken).ConfigureAwait(false);
+
+            if (!string.Equals(
+                actualHash,
+                entry.PlaintextSha256,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Исходная папка изменилась: SHA-256 файла «{entry.RelativePath}» не совпадает с vault.");
+            }
+
+            checkedFiles++;
+            checkedBytes += entry.Length;
+
+            progress?.Report(new VaultBuildProgress(
+                "Сверка исходной папки",
+                checkedFiles,
+                manifest.Files.Count,
+                checkedBytes,
+                totalBytes));
+        }
+    }
+
+    public static void DeletePlaintextTreeOrThrow(string path)
+    {
+        if (!Directory.Exists(path))
+            return;
+
+        var rootInfo = new DirectoryInfo(path);
+        if ((rootInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidOperationException("Удаление reparse point запрещено.");
+
+        var directories = new List<string> { path };
+        var files = new List<string>();
+        var stack = new Stack<string>();
+        stack.Push(path);
+
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+
+            foreach (var directory in Directory.EnumerateDirectories(
+                current,
+                "*",
+                SearchOption.TopDirectoryOnly))
+            {
+                var info = new DirectoryInfo(directory);
+                if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new InvalidOperationException(
+                        $"В plaintext обнаружен reparse point: {directory}");
+                }
+
+                directories.Add(directory);
+                stack.Push(directory);
+            }
+
+            foreach (var file in Directory.EnumerateFiles(
+                current,
+                "*",
+                SearchOption.TopDirectoryOnly))
+            {
+                var info = new FileInfo(file);
+                if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new InvalidOperationException(
+                        $"В plaintext обнаружен файл-reparse point: {file}");
+                }
+
+                files.Add(file);
+            }
+        }
+
+        foreach (var file in files)
+        {
+            File.SetAttributes(file, FileAttributes.Normal);
+            File.Delete(file);
+        }
+
+        for (var i = directories.Count - 1; i >= 0; i--)
+        {
+            var directory = directories[i];
+
+            try
+            {
+                File.SetAttributes(directory, FileAttributes.Normal);
+            }
+            catch
+            {
+            }
+
+            Directory.Delete(directory, recursive: false);
+        }
+    }
+
     public async Task<VaultRestoreResult> RestoreVaultAsync(
         string vaultPath,
         string destinationPath,

@@ -1,0 +1,87 @@
+<Window x:Class="GeniaFolder.Views.ProtectionSetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Настройка защиты — GeniaFolder"
+        Icon="/GeniaFolder;component/Assets/GeniaFolder.ico"
+        Width="560"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="26">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Standard Protection"
+                   FontSize="22"
+                   FontWeight="SemiBold" />
+
+        <Border Grid.Row="1"
+                Margin="0,12,0,18"
+                Padding="12"
+                Background="#FFF8E1"
+                BorderBrush="#F4D77D"
+                BorderThickness="1"
+                CornerRadius="8">
+            <TextBlock x:Name="InfoText"
+                       TextWrapping="Wrap"
+                       Foreground="#6B5715" />
+        </Border>
+
+        <StackPanel Grid.Row="2">
+            <TextBlock Text="Пароль папки"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,6" />
+            <PasswordBox x:Name="PasswordBox"
+                         MinHeight="34"
+                         Padding="8,4" />
+            <TextBlock Text="Минимум 12 символов. Пароль не сохраняется."
+                       Margin="0,5,0,0"
+                       FontSize="12"
+                       Foreground="#6C7078" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Margin="0,16,0,0">
+            <TextBlock Text="Повторите пароль"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,6" />
+            <PasswordBox x:Name="ConfirmBox"
+                         MinHeight="34"
+                         Padding="8,4" />
+        </StackPanel>
+
+        <CheckBox x:Name="AcknowledgeBox"
+                  Grid.Row="4"
+                  Margin="0,18,0,0"
+                  Content="Я понимаю, что на этом этапе создаются ключи защиты, но файлы в папке пока остаются обычными и незашифрованными."
+                  VerticalContentAlignment="Top" />
+
+        <TextBlock x:Name="ErrorText"
+                   Grid.Row="5"
+                   Margin="0,10,0,0"
+                   Foreground="#B42318"
+                   TextWrapping="Wrap" />
+
+        <StackPanel Grid.Row="6"
+                    Margin="0,22,0,0"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="Отмена"
+                    IsCancel="True"
+                    Padding="16,7"
+                    Margin="0,0,8,0" />
+            <Button x:Name="CreateButton"
+                    Content="Создать ключи"
+                    IsDefault="True"
+                    IsEnabled="False"
+                    Padding="16,7"
+                    Click="Create_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

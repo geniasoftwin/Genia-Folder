@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.6
+## Current version: 0.2.0-alpha.7
 
 Implemented:
 
@@ -154,3 +154,10 @@ The destructive transition is crash-aware:
 - an interrupted unlock that already published plaintext can be repaired by byte-for-byte verification rather than overwriting data.
 
 GeniaFolder does not claim physical secure erase of SSD/NVMe blocks. Vault-only removes plaintext from the live filesystem namespace; storage-media remanence is outside this alpha milestone.
+
+
+## 0.2.0-alpha.7 folder identity tracking
+
+Managed folders now store the Windows filesystem identity of the directory (volume serial + file ID). If a plaintext folder is renamed in Explorer within the same parent directory, GeniaFolder can recognize the same directory and update its saved name/path automatically instead of treating it as deleted.
+
+Legacy entries migrate automatically the next time their folder is available. Vault-only and LockPending states deliberately skip rename recovery because a missing plaintext path is expected there.

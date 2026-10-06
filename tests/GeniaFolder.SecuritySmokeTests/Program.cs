@@ -108,11 +108,17 @@ internal static class Program
                 multiChunk);
             CryptographicOperations.ZeroMemory(multiChunk);
 
+            var sourceIdentity = identityProbe.TryGetIdentity(source)
+                ?? throw new InvalidOperationException(
+                    "Could not capture source directory identity.");
+
             var folder = new ManagedFolder
             {
                 Id = Guid.NewGuid(),
                 Name = "Smoke Vault",
-                Path = source
+                Path = source,
+                VolumeSerialNumber = sourceIdentity.VolumeSerialNumber,
+                FileId = sourceIdentity.FileId
             };
 
             var profilesRoot = Path.Combine(root, "profiles");

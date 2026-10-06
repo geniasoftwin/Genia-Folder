@@ -724,22 +724,48 @@ public partial class MainWindow : Window
         if (!TryGetFolder(sender, out var folder))
             return;
 
-        if (_protection.HasPreparedProfile(folder.Id))
+        var protectedFolder = _protection.HasPreparedProfile(folder.Id);
+
+        if (protectedFolder)
         {
-            MessageBox.Show(this,
-                "Защищённую папку пока нельзя просто убрать из GeniaFolder: профиль ключей и encrypted vault могут стать недоступны из интерфейса.\n\nСначала разблокируйте/восстановите данные. Отдельное безопасное удаление vault и профиля добавим позже.",
-                "GeniaFolder — защищённая папка",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-            return;
+            var storageState = _protection.GetStorageInfo(folder.Id)?.State
+                ?? VaultStorageState.PlaintextPresent;
+
+            if (storageState != VaultStorageState.PlaintextPresent)
+            {
+                MessageBox.Show(this,
+                    "Папку в состоянии Vault-only или LockPending нельзя убирать из GeniaFolder. " +
+                    "Сначала завершите разблокировку/восстановление, чтобы не потерять доступ к управлению encrypted vault.",
+                    "GeniaFolder — защищённая папка",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            var passwordDialog = new ProtectedActionPasswordWindow(
+                folder.Id,
+                folder.Name,
+                "После проверки будет удалена только карточка из списка GeniaFolder. " +
+                "Сама папка, её файлы, protection-профиль и encrypted vault не удаляются.",
+                _protection)
+            {
+                Owner = this
+            };
+
+            if (passwordDialog.ShowDialog() != true)
+                return;
         }
 
         var locationNote = Directory.Exists(folder.Path)
             ? "Сама папка и её файлы НЕ будут удалены."
             : "Папка сейчас недоступна. Будет удалена только запись из GeniaFolder.";
 
+        var protectedNote = protectedFolder
+            ? "\n\nProtection-профиль и encrypted vault останутся на диске."
+            : string.Empty;
+
         var result = MessageBox.Show(this,
-            $"Убрать «{folder.Name}» из GeniaFolder?\n\n{locationNote}",
+            $"Убрать «{folder.Name}» из GeniaFolder?\n\n{locationNote}{protectedNote}",
             "GeniaFolder",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);

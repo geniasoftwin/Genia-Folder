@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.9
+## Current version: 0.2.0-alpha.10
 
 Implemented:
 
@@ -183,3 +183,16 @@ For a protected folder with a verified vault, `Найти…` can validate a rel
 Removing a protected entry from the GeniaFolder list now requires the folder password. Vault-only and LockPending entries cannot be removed from the list until the storage transaction is returned to plaintext-present state. Removing an entry does not delete the folder, protection profile or encrypted vault.
 
 For repeatable manual testing, `RESET_TEST_ENV.cmd` safely moves the current test root and local GeniaFolder app state into timestamped backup folders, then creates a fresh `D:\GeniaFolder test\Папка 1`, `Папка 2` and `Папка 3`.
+
+
+## 0.2.0-alpha.10 installation-wide Master Recovery
+
+GeniaFolder now uses one paper Master Recovery Key per local installation.
+
+- The first protected folder creates a random 256-bit Master Recovery secret and shows the GF1 paper key once.
+- The Master secret itself is never stored. GeniaFolder persists only a SHA-256 verification hash/fingerprint.
+- Every protected folder still gets its own random 256-bit FEK and its own user password.
+- Each folder derives a different recovery KEK from the shared Master secret using HMAC-SHA256, a per-profile random salt, and the FolderId.
+- Later folders require the same paper Master Recovery Key during protection setup; a new paper key is not generated.
+- The same Master Recovery Key can recover every folder enrolled under that installation, while each folder password remains independent.
+- Minimum folder password length is now 8 characters; the UI recommends 12+.

@@ -68,6 +68,58 @@ internal static class Program
 
             Pass("stable GeniaFolder marker survives copy/delete semantics");
 
+            var appearanceCleanupPath =
+                Path.Combine(root, "appearance-cleanup");
+            Directory.CreateDirectory(appearanceCleanupPath);
+
+            var cleanupMarkerId = Guid.NewGuid();
+            markerService.EnsureMarker(
+                appearanceCleanupPath,
+                cleanupMarkerId);
+
+            var oldIcon = Path.Combine(
+                appearanceCleanupPath,
+                ".geniafolder-blue.ico");
+            await File.WriteAllBytesAsync(
+                oldIcon,
+                [0x00, 0x01, 0x02]);
+
+            File.SetAttributes(
+                oldIcon,
+                FileAttributes.Hidden |
+                FileAttributes.System);
+
+            var desktopIni = Path.Combine(
+                appearanceCleanupPath,
+                "desktop.ini");
+
+            await File.WriteAllTextAsync(
+                desktopIni,
+                "[.ShellClassInfo]\r\nIconResource=.geniafolder-blue.ico,0\r\n",
+                Encoding.Unicode);
+
+            File.SetAttributes(
+                desktopIni,
+                FileAttributes.Hidden |
+                FileAttributes.System);
+
+            await new FolderAppearanceService()
+                .RemoveCustomizationAsync(
+                    appearanceCleanupPath);
+
+            Assert(
+                !File.Exists(oldIcon) &&
+                !File.Exists(desktopIni),
+                "removing a managed entry must clear GeniaFolder shell color metadata");
+
+            Assert(
+                markerService.Matches(
+                    appearanceCleanupPath,
+                    cleanupMarkerId),
+                "removing color customization must preserve the stable folder marker");
+
+            Pass("removing GeniaFolder appearance keeps tracking marker intact");
+
             var moveSource = Path.Combine(root, "move-source");
             var managedRoot = Path.Combine(root, "managed-root");
             var movedPath = Path.Combine(managedRoot, "move-source");

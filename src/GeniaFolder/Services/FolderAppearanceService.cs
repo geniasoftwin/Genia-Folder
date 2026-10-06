@@ -20,51 +20,78 @@ public sealed class FolderAppearanceService
     private const string LegacyIconFileName = ".geniafolder.ico";
     private const string DesktopIniFileName = "desktop.ini";
     private const string LegacyMetadataDirectoryName = ".geniafolder";
+    private const int RetainedGeneratedIcons = 8;
+
+    private readonly SemaphoreSlim _appearanceGate = new(1, 1);
 
     public async Task ApplyColorAsync(string folderPath, FolderColor color)
     {
-        if (!Directory.Exists(folderPath))
-            throw new DirectoryNotFoundException(folderPath);
+        await _appearanceGate.WaitAsync();
 
-        folderPath = Path.GetFullPath(folderPath);
+        try
+        {
+            if (!Directory.Exists(folderPath))
+                throw new DirectoryNotFoundException(folderPath);
 
-        var iconFileName = GetIconFileName(color);
-        var iconPath = Path.Combine(folderPath, iconFileName);
-        var desktopIniPath = Path.Combine(folderPath, DesktopIniFileName);
+            folderPath = Path.GetFullPath(folderPath);
 
-        PrepareForOverwrite(iconPath);
-        PrepareForOverwrite(desktopIniPath);
+            // Explorer caches folder icons aggressively by resource path.
+            // Never overwrite/reuse the same .ico path for a new selection.
+            var iconFileName = GetIconFileName(color);
+            var iconPath = Path.Combine(folderPath, iconFileName);
+            var desktopIniPath = Path.Combine(folderPath, DesktopIniFileName);
 
-        await WriteColorIconAsync(iconPath, GetColor(color));
+            await WriteColorIconAsync(
+                iconPath,
+                GetColor(color));
 
-        var ini = "[.ShellClassInfo]\r\n" +
-                  $"IconResource={iconFileName},0\r\n" +
-                  "IconIndex=0\r\n" +
-                  "ConfirmFileOp=0\r\n";
+            File.SetAttributes(
+                iconPath,
+                FileAttributes.Hidden | FileAttributes.System);
 
-        await File.WriteAllTextAsync(desktopIniPath, ini, Encoding.Unicode);
+            var ini =
+                "[.ShellClassInfo]\r\n" +
+                $"IconResource={iconFileName},0\r\n" +
+                "IconIndex=0\r\n" +
+                "ConfirmFileOp=0\r\n";
 
-        File.SetAttributes(iconPath, FileAttributes.Hidden | FileAttributes.System);
-        File.SetAttributes(desktopIniPath, FileAttributes.Hidden | FileAttributes.System);
+            await WriteDesktopIniAtomicAsync(
+                desktopIniPath,
+                ini);
 
-        CleanupGeneratedIcons(
-            folderPath,
-            iconFileName);
+            // desktop.ini is only honored for customized folders when the
+            // shell customization attribute is present.
+            PathMakeSystemFolder(folderPath);
 
-        PathMakeSystemFolder(folderPath);
-        CleanupLegacyFlatIcon(folderPath);
-        CleanupLegacyMetadataDirectory(folderPath);
+            CleanupLegacyFlatIcon(folderPath);
+            CleanupLegacyMetadataDirectory(folderPath);
 
-        RefreshExplorer(folderPath);
+            // Do NOT immediately delete the previous icon. Explorer may still
+            // be reading a cached older desktop.ini; keeping a short history
+            // prevents a transient fallback to the default folder icon.
+            CleanupOldGeneratedIcons(
+                folderPath,
+                iconFileName);
+
+            RefreshExplorer(folderPath);
+        }
+        finally
+        {
+            _appearanceGate.Release();
+        }
     }
 
     public async Task RemoveCustomizationAsync(
         string folderPath)
     {
-        if (!Directory.Exists(folderPath))
-            return;
+        await _appearanceGate.WaitAsync();
 
-        folderPath = Path.GetFullPath(folderPath);
+        try
+        {
+            if (!Directory.Exists(folderPath))
+                return;
+
+            folderPath = Path.GetFullPath(folderPath);
 
         var desktopIniPath = Path.Combine(
             folderPath,
@@ -133,6 +160,11 @@ public sealed class FolderAppearanceService
         }
 
         RefreshExplorer(folderPath);
+        }
+        finally
+        {
+            _appearanceGate.Release();
+        }
     }
 
     public static MediaColor GetColor(FolderColor color) => color switch
@@ -147,7 +179,7 @@ public sealed class FolderAppearanceService
     };
 
     private static string GetIconFileName(FolderColor color) =>
-        $".geniafolder-{color.ToString().ToLowerInvariant()}.ico";
+        $".geniafolder-{color.ToString().ToLowerInvariant()}-{Guid.NewGuid():N}.ico";
 
     private static void RefreshExplorer(string folderPath)
     {
@@ -181,32 +213,105 @@ public sealed class FolderAppearanceService
         }
     }
 
-    private static void CleanupGeneratedIcons(
+    private static void CleanupOldGeneratedIcons(
         string folderPath,
         string keepFileName)
     {
-        foreach (var path in Directory.EnumerateFiles(
-            folderPath,
-            ".geniafolder-*.ico",
-            SearchOption.TopDirectoryOnly))
+        FileInfo[] icons;
+
+        try
+        {
+            icons = Directory
+                .EnumerateFiles(
+                    folderPath,
+                    ".geniafolder-*.ico",
+                    SearchOption.TopDirectoryOnly)
+                .Select(path => new FileInfo(path))
+                .OrderByDescending(info =>
+                    info.LastWriteTimeUtc)
+                .ToArray();
+        }
+        catch
+        {
+            return;
+        }
+
+        var retained = 0;
+
+        foreach (var icon in icons)
         {
             if (string.Equals(
-                Path.GetFileName(path),
+                icon.Name,
                 keepFileName,
                 StringComparison.OrdinalIgnoreCase))
             {
+                retained++;
+                continue;
+            }
+
+            if (retained < RetainedGeneratedIcons)
+            {
+                retained++;
                 continue;
             }
 
             try
             {
-                File.SetAttributes(path, FileAttributes.Normal);
-                File.Delete(path);
+                File.SetAttributes(
+                    icon.FullName,
+                    FileAttributes.Normal);
+                icon.Delete();
             }
             catch
             {
-                // Stale icon cleanup is cosmetic; the selected icon and
-                // desktop.ini have already been written successfully.
+                // Old icon cleanup is cosmetic. Never break a successful
+                // color change because Explorer still has a stale handle.
+            }
+        }
+    }
+
+    private static async Task WriteDesktopIniAtomicAsync(
+        string desktopIniPath,
+        string content)
+    {
+        var tempPath =
+            desktopIniPath +
+            ".tmp-" +
+            Guid.NewGuid().ToString("N");
+
+        try
+        {
+            await File.WriteAllTextAsync(
+                tempPath,
+                content,
+                Encoding.Unicode);
+
+            if (File.Exists(desktopIniPath))
+                PrepareForOverwrite(desktopIniPath);
+
+            File.Move(
+                tempPath,
+                desktopIniPath,
+                overwrite: true);
+
+            File.SetAttributes(
+                desktopIniPath,
+                FileAttributes.Hidden | FileAttributes.System);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                try
+                {
+                    File.SetAttributes(
+                        tempPath,
+                        FileAttributes.Normal);
+                    File.Delete(tempPath);
+                }
+                catch
+                {
+                }
             }
         }
     }

@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.13
+## Current version: 0.2.0-alpha.14
 
 Implemented:
 
@@ -40,7 +40,7 @@ GeniaFolder metadata is stored in:
 
 `%LOCALAPPDATA%\GeniaFolder\folders.json`
 
-Managed folders receive hidden per-color icon files such as `.geniafolder-blue.ico` plus `desktop.ini`, allowing Windows Explorer to show the selected color while avoiding stale icon-cache reuse.
+Managed folders receive hidden unique icon resources such as `.geniafolder-blue-<id>.ico` plus an atomically updated `desktop.ini`. GeniaFolder retains a short history of prior icon resources so Explorer cannot fall back to the default folder while its shell cache is catching up.
 
 ## Lifecycle policy
 
@@ -225,3 +225,12 @@ Folder tracking no longer relies only on the Windows volume/file ID. Managed pla
 `Убрать` now removes GeniaFolder-owned `desktop.ini` and generated folder icons before deleting the card, while preserving `.geniafolder.id`. Re-adding the same physical folder therefore reconnects its stable GeniaFolder ID/profile instead of creating an unrelated identity, and color customization starts cleanly.
 
 Master Recovery setup is now installation-level and separated from folders. On a fresh GeniaFolder state, the app creates and displays the paper Master Recovery Key before the main window is shown. Folder creation/addition never generates a paper key. The main window has a separate `Master Key` control that shows its fingerprint/status; the secret itself is not stored in clear text and cannot be re-displayed.
+
+
+## 0.2.0-alpha.14 Explorer color-cache hardening
+
+Folder color changes no longer overwrite or immediately replace a single fixed icon resource. Every application publishes a unique `.geniafolder-<color>-<id>.ico`, then atomically switches `desktop.ini` to that resource. A bounded history of previous generated icons is retained temporarily because Explorer can continue reading a cached older `desktop.ini` after a color change.
+
+Appearance changes are serialized so rapid color selections cannot finish out of order. GeniaFolder explicitly applies the Windows shell customization attributes to the directory and notifies both the folder item and its parent view. Removing a managed entry still removes all GeniaFolder color metadata while preserving the stable `.geniafolder.id` tracking marker.
+
+The Windows smoke suite now applies two different colors sequentially and verifies that each `desktop.ini` references a distinct existing icon resource, the previous icon is retained for cache safety, and cleanup removes all color resources without deleting the tracking marker.

@@ -471,7 +471,10 @@ public sealed class FolderAppearanceService
         public uint cchLogo;
     }
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    [DllImport(
+        "shell32.dll",
+        CharSet = CharSet.Unicode,
+        ExactSpelling = true)]
     private static extern int SHGetSetFolderCustomSettings(
         ref SHFOLDERCUSTOMSETTINGS pfcs,
         string pszPath,

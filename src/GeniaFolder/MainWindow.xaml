@@ -73,6 +73,10 @@
                                             Tag="{Binding Id}"
                                             IsEnabled="{Binding ProtectionEnabled}"
                                             Click="Protection_Click" />
+                                    <Button Content="Найти…"
+                                            Tag="{Binding Id}"
+                                            Visibility="{Binding FindVisibility}"
+                                            Click="FindFolder_Click" />
                                     <Button Content="Убрать"
                                             Tag="{Binding Id}"
                                             Click="Remove_Click" />

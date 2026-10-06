@@ -520,7 +520,17 @@ public partial class MainWindow : Window
             return;
         }
 
-        var setup = new ProtectionSetupWindow(folder.Name) { Owner = this };
+        var hasMasterRecoveryKey =
+            _protection.HasMasterRecoveryKey;
+
+        var setup = new ProtectionSetupWindow(
+            folder.Name,
+            hasMasterRecoveryKey,
+            _protection.GetMasterRecoveryFingerprint())
+        {
+            Owner = this
+        };
+
         if (setup.ShowDialog() != true)
             return;
 
@@ -530,7 +540,8 @@ public partial class MainWindow : Window
         {
             prepared = _protection.PrepareStandardProfile(
                 folder,
-                setup.Password);
+                setup.Password,
+                setup.MasterRecoveryKey);
         }
         catch (Exception ex)
         {
@@ -546,32 +557,36 @@ public partial class MainWindow : Window
             setup.ClearSecrets();
         }
 
-        var recovery = new RecoveryKeyWindow(
-            folder.Name,
-            prepared.RecoveryKey,
-            prepared.Fingerprint)
+        if (prepared.IsNewMasterRecoveryKey)
         {
-            Owner = this
-        };
+            var recovery = new RecoveryKeyWindow(
+                folder.Name,
+                prepared.RecoveryKey,
+                prepared.MasterRecoveryFingerprint)
+            {
+                Owner = this
+            };
 
-        if (recovery.ShowDialog() != true)
-        {
-            MessageBox.Show(this,
-                "Настройка защиты отменена. Профиль ключей не был сохранён.",
-                "GeniaFolder",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-            return;
+            if (recovery.ShowDialog() != true)
+            {
+                MessageBox.Show(this,
+                    "Настройка защиты отменена. Общий Master Recovery Key и профиль папки не были сохранены.",
+                    "GeniaFolder",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
         }
 
         try
         {
-            await _protection.SavePreparedProfileAsync(prepared.Profile);
+            await _protection.SavePreparedProfileAsync(prepared);
             RebuildRows();
 
             MessageBox.Show(this,
                 "Ключи Standard Protection сохранены.\n\n" +
-                "Пароль и Master Recovery Key проверены, FEK хранится только в зашифрованном виде.\n\n" +
+                "У папки свой FEK и свой пароль. Общий Master Recovery Key этой установки " +
+                "может восстановить доступ к этой и другим привязанным папкам.\n\n" +
                 "Теперь кнопка «Шифровать» создаст отдельный encrypted vault, " +
                 "полностью проверит его и при этом не затронет исходные файлы.",
                 "GeniaFolder — следующий шаг",

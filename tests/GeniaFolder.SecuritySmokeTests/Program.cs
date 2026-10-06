@@ -171,6 +171,60 @@ internal static class Program
 
             Pass("vault encrypted and fully verified");
 
+            var relocationCopy = Path.Combine(root, "relocation-copy");
+            CopyDirectory(source, relocationCopy);
+
+            var relocationIdentity = identityProbe.TryGetIdentity(
+                relocationCopy)
+                ?? throw new InvalidOperationException(
+                    "Could not capture relocation-copy identity.");
+
+            Assert(
+                relocationIdentity.VolumeSerialNumber != folder.VolumeSerialNumber ||
+                !string.Equals(
+                    relocationIdentity.FileId,
+                    folder.FileId,
+                    StringComparison.OrdinalIgnoreCase),
+                "copied relocation candidate should have a different Windows identity");
+
+            var relocationCandidate = new ManagedFolder
+            {
+                Id = folder.Id,
+                Name = "Relocation copy",
+                Path = relocationCopy
+            };
+
+            using (var passwordSession =
+                await RequirePasswordSessionAsync(protection, folder.Id))
+            {
+                await vault.VerifySourceMatchesVaultAsync(
+                    relocationCandidate,
+                    built.VaultPath,
+                    passwordSession);
+            }
+
+            Pass("different Windows identity accepted only after vault content verification");
+
+            await File.AppendAllTextAsync(
+                Path.Combine(relocationCopy, "root.txt"),
+                "tamper");
+
+            using (var passwordSession =
+                await RequirePasswordSessionAsync(protection, folder.Id))
+            {
+                await ExpectInvalidOperationAsync(
+                    "modified relocation candidate",
+                    async () =>
+                    {
+                        await vault.VerifySourceMatchesVaultAsync(
+                            relocationCandidate,
+                            built.VaultPath,
+                            passwordSession);
+                    });
+            }
+
+            Pass("modified relocation candidate rejected by vault content verification");
+
             var passwordRestore = Path.Combine(root, "restore-password");
 
             using (var passwordSession =

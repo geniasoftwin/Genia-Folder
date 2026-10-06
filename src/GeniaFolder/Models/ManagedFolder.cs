@@ -15,6 +15,11 @@ public sealed class ManagedFolder
     public ulong VolumeSerialNumber { get; set; }
     public string FileId { get; set; } = string.Empty;
 
+    // Previously confirmed locations. This lets GeniaFolder recognize a
+    // directory that returns after a cross-volume move even though Windows
+    // assigned it a new filesystem identity.
+    public List<string> KnownPaths { get; set; } = [];
+
     public bool Exists => Directory.Exists(Path);
     public string ProtectionLabel => Protection == ProtectionMode.None ? "Без защиты" : Protection.ToString();
 }

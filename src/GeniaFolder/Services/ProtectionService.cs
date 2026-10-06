@@ -1076,6 +1076,15 @@ public sealed class ProtectionService
                 }
             }
 
+            // The encoder zero-pads the final incomplete Base32 symbol.
+            // Reject alternate textual encodings that differ only in those
+            // unused bits but would otherwise decode to the same key bytes.
+            if (bitsInBuffer > 0 && buffer != 0)
+            {
+                throw new FormatException(
+                    "Non-canonical Base32 padding.");
+            }
+
             return bytes.ToArray();
         }
     }

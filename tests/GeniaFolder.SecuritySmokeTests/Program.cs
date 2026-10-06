@@ -87,6 +87,34 @@ internal static class Program
 
             Pass("moved folder resolved inside known managed root");
 
+            // Simulate MainWindow adopting the moved path, then the user
+            // cutting the directory back to its original parent.
+            movedFolder.Path = resolvedMovedPath!;
+
+            Directory.Move(
+                movedPath,
+                moveSource);
+
+            var resolvedReturnedPath = resolver.TryResolve(
+                movedFolder,
+                [movedFolder, knownRoot]);
+
+            Assert(
+                string.Equals(
+                    Path.GetFullPath(moveSource),
+                    resolvedReturnedPath,
+                    StringComparison.OrdinalIgnoreCase),
+                "folder moved back to its original parent was not resolved");
+
+            Assert(
+                identityProbe.Matches(
+                    moveSource,
+                    moveIdentity.VolumeSerialNumber,
+                    moveIdentity.FileId),
+                "round-trip move must preserve the original Windows identity");
+
+            Pass("folder resolved after move into managed folder and back out");
+
             var source = Path.Combine(root, "source");
             var nested = Path.Combine(source, "nested");
             Directory.CreateDirectory(nested);

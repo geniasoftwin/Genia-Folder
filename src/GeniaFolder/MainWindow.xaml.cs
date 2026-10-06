@@ -772,11 +772,10 @@ public partial class MainWindow : Window
             }
         }
 
-        UpdateManagedFolderPath(
-            folder,
-            selectedPath);
+        var newIdentity =
+            _folderIdentity.TryGetIdentity(selectedPath);
 
-        if (!CaptureFolderIdentity(folder))
+        if (newIdentity is null)
         {
             MessageBox.Show(this,
                 "Не удалось прочитать новый Windows identity выбранной папки. Путь не был сохранён.",
@@ -785,6 +784,15 @@ public partial class MainWindow : Window
                 MessageBoxImage.Warning);
             return;
         }
+
+        UpdateManagedFolderPath(
+            folder,
+            selectedPath);
+
+        folder.VolumeSerialNumber =
+            newIdentity.VolumeSerialNumber;
+        folder.FileId =
+            newIdentity.FileId;
 
         await _registry.SaveAsync(_folders);
         RebuildRows();

@@ -677,12 +677,19 @@ public partial class MainWindow : Window
             return;
         }
 
-        var hasMasterRecoveryKey =
-            _protection.HasMasterRecoveryKey;
+        if (!_protection.HasMasterRecoveryKey)
+        {
+            MessageBox.Show(this,
+                "Master Recovery Key установки не настроен. Перезапустите GeniaFolder и завершите первичную настройку.",
+                "GeniaFolder — Master Recovery",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
 
         var setup = new ProtectionSetupWindow(
             folder.Name,
-            hasMasterRecoveryKey,
+            requiresMasterRecoveryKey: true,
             _protection.GetMasterRecoveryFingerprint())
         {
             Owner = this
@@ -712,27 +719,6 @@ public partial class MainWindow : Window
         finally
         {
             setup.ClearSecrets();
-        }
-
-        if (prepared.IsNewMasterRecoveryKey)
-        {
-            var recovery = new RecoveryKeyWindow(
-                folder.Name,
-                prepared.RecoveryKey,
-                prepared.MasterRecoveryFingerprint)
-            {
-                Owner = this
-            };
-
-            if (recovery.ShowDialog() != true)
-            {
-                MessageBox.Show(this,
-                    "Настройка защиты отменена. Общий Master Recovery Key и профиль папки не были сохранены.",
-                    "GeniaFolder",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-                return;
-            }
         }
 
         try

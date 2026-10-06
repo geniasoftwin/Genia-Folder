@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.12
+## Current version: 0.2.0-alpha.13
 
 Implemented:
 
@@ -216,3 +216,12 @@ GeniaFolder now treats an existing registered path with a changed identity as a 
 - if protection keys exist but no verified vault has been created yet, explicit folder-password authentication is required before rebinding.
 
 Security smoke tests recreate a folder object at the same path with identical bytes but a new Windows file ID to simulate D: -> E: -> D: behavior.
+
+
+## 0.2.0-alpha.13 stable folder marker, clean removal and first-run Master Key
+
+Folder tracking no longer relies only on the Windows volume/file ID. Managed plaintext folders receive a hidden/system `.geniafolder.id` marker containing the GeniaFolder folder ID. Explorer copy/move operations preserve the marker across volumes, while Windows may assign a new filesystem identity. Confirmed previous locations are also retained in the registry, and parents of other managed folders are used as bounded search anchors. A protected folder found by marker is treated as a candidate and still requires explicit cryptographic verification before a new Windows identity is trusted.
+
+`Убрать` now removes GeniaFolder-owned `desktop.ini` and generated folder icons before deleting the card, while preserving `.geniafolder.id`. Re-adding the same physical folder therefore reconnects its stable GeniaFolder ID/profile instead of creating an unrelated identity, and color customization starts cleanly.
+
+Master Recovery setup is now installation-level and separated from folders. On a fresh GeniaFolder state, the app creates and displays the paper Master Recovery Key before the main window is shown. Folder creation/addition never generates a paper key. The main window has a separate `Master Key` control that shows its fingerprint/status; the secret itself is not stored in clear text and cannot be re-displayed.

@@ -47,9 +47,90 @@ public sealed class FolderAppearanceService
         File.SetAttributes(iconPath, FileAttributes.Hidden | FileAttributes.System);
         File.SetAttributes(desktopIniPath, FileAttributes.Hidden | FileAttributes.System);
 
+        CleanupGeneratedIcons(
+            folderPath,
+            iconFileName);
+
         PathMakeSystemFolder(folderPath);
         CleanupLegacyFlatIcon(folderPath);
         CleanupLegacyMetadataDirectory(folderPath);
+
+        RefreshExplorer(folderPath);
+    }
+
+    public async Task RemoveCustomizationAsync(
+        string folderPath)
+    {
+        if (!Directory.Exists(folderPath))
+            return;
+
+        folderPath = Path.GetFullPath(folderPath);
+
+        var desktopIniPath = Path.Combine(
+            folderPath,
+            DesktopIniFileName);
+
+        if (File.Exists(desktopIniPath))
+        {
+            var ownedByGeniaFolder = false;
+
+            try
+            {
+                var text = await File.ReadAllTextAsync(
+                    desktopIniPath,
+                    Encoding.Unicode);
+
+                ownedByGeniaFolder =
+                    text.Contains(
+                        ".geniafolder-",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    text.Contains(
+                        ".geniafolder.ico",
+                        StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                // If it cannot be read, do not delete an unknown desktop.ini.
+            }
+
+            if (ownedByGeniaFolder)
+            {
+                PrepareForOverwrite(desktopIniPath);
+                File.Delete(desktopIniPath);
+            }
+        }
+
+        foreach (var icon in Directory.EnumerateFiles(
+            folderPath,
+            ".geniafolder*.ico",
+            SearchOption.TopDirectoryOnly))
+        {
+            try
+            {
+                File.SetAttributes(icon, FileAttributes.Normal);
+                File.Delete(icon);
+            }
+            catch
+            {
+                throw new IOException(
+                    $"Не удалось удалить старый значок GeniaFolder: {icon}");
+            }
+        }
+
+        try
+        {
+            var attributes = File.GetAttributes(folderPath);
+            if ((attributes & FileAttributes.System) != 0)
+            {
+                File.SetAttributes(
+                    folderPath,
+                    attributes & ~FileAttributes.System);
+            }
+        }
+        catch
+        {
+            // Explorer refresh still runs; failure here is cosmetic.
+        }
 
         RefreshExplorer(folderPath);
     }
@@ -97,6 +178,36 @@ public sealed class FolderAppearanceService
         }
         catch (UnauthorizedAccessException)
         {
+        }
+    }
+
+    private static void CleanupGeneratedIcons(
+        string folderPath,
+        string keepFileName)
+    {
+        foreach (var path in Directory.EnumerateFiles(
+            folderPath,
+            ".geniafolder-*.ico",
+            SearchOption.TopDirectoryOnly))
+        {
+            if (string.Equals(
+                Path.GetFileName(path),
+                keepFileName,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                File.SetAttributes(path, FileAttributes.Normal);
+                File.Delete(path);
+            }
+            catch
+            {
+                // Stale icon cleanup is cosmetic; the selected icon and
+                // desktop.ini have already been written successfully.
+            }
         }
     }
 

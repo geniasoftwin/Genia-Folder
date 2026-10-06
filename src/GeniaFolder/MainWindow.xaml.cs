@@ -624,10 +624,29 @@ public partial class MainWindow : Window
                     Directory.Exists(folder.Path) &&
                     (_protection.GetStorageInfo(folder.Id)?.State
                         ?? VaultStorageState.PlaintextPresent) ==
-                       VaultStorageState.PlaintextPresent &&
-                    CaptureFolderIdentity(folder))
+                       VaultStorageState.PlaintextPresent)
                 {
-                    await _registry.SaveAsync(_folders);
+                    var identityChanged =
+                        CaptureFolderIdentity(folder);
+
+                    try
+                    {
+                        _folderMarkers.EnsureMarker(
+                            folder.Path,
+                            folder.Id);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(this,
+                            "Данные восстановлены, но не удалось восстановить tracking-маркер GeniaFolder:\n" +
+                            ex.Message,
+                            "GeniaFolder — tracking",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Warning);
+                    }
+
+                    if (identityChanged)
+                        await _registry.SaveAsync(_folders);
                 }
 
                 RebuildRows();

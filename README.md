@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.11
+## Current version: 0.2.0-alpha.12
 
 Implemented:
 
@@ -203,3 +203,16 @@ GeniaFolder now uses one paper Master Recovery Key per local installation.
 Folder location recovery now searches the last known parent and a bounded chain of ancestor directories, in addition to known managed folders. Each search root is checked only at the direct-child level; GeniaFolder still does not recursively scan an entire drive.
 
 This fixes the round-trip case where a tracked folder is moved into another managed folder, adopted at the nested path, and later moved back to its original parent. The stable Windows volume/file ID is used to prove identity before the registry path is updated.
+
+
+## 0.2.0-alpha.12 cross-volume round-trip recovery
+
+Moving a directory between volumes is a copy/delete operation from the filesystem identity perspective. Returning it to the original path therefore does not restore the old Windows file ID.
+
+GeniaFolder now treats an existing registered path with a changed identity as a cross-volume return candidate:
+- unprotected entries automatically adopt the new Windows identity when they reappear at the exact registered path;
+- protected entries fail closed and show a Verify action instead of appearing simply lost;
+- if a verified vault exists, the candidate must be authenticated with the folder password or installation Master Recovery Key and match the encrypted manifest/file SHA-256 set before the new identity is persisted;
+- if protection keys exist but no verified vault has been created yet, explicit folder-password authentication is required before rebinding.
+
+Security smoke tests recreate a folder object at the same path with identical bytes but a new Windows file ID to simulate D: -> E: -> D: behavior.

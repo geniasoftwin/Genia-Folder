@@ -29,7 +29,48 @@ public sealed class FolderLocationResolverService
         var oldParent = Directory.GetParent(
             missingFolder.Path)?.FullName;
 
-        AddRoot(oldParent);
+        // Search the last known parent first, then a bounded set of its
+        // ancestors. This covers ordinary Explorer moves such as:
+        // root\folder -> root\managed\folder -> root\folder
+        // without recursively scanning an entire drive.
+        var ancestor = oldParent;
+        for (var depth = 0; depth < 8 && ancestor is not null; depth++)
+        {
+            AddRoot(ancestor);
+
+            string? parent;
+            string? volumeRoot;
+
+            try
+            {
+                parent = Directory.GetParent(ancestor)?.FullName;
+                volumeRoot = Path.GetPathRoot(ancestor);
+            }
+            catch
+            {
+                break;
+            }
+
+            if (string.IsNullOrWhiteSpace(parent))
+                break;
+
+            if (!string.IsNullOrWhiteSpace(volumeRoot) &&
+                string.Equals(
+                    Path.GetFullPath(parent)
+                        .TrimEnd(
+                            Path.DirectorySeparatorChar,
+                            Path.AltDirectorySeparatorChar),
+                    Path.GetFullPath(volumeRoot)
+                        .TrimEnd(
+                            Path.DirectorySeparatorChar,
+                            Path.AltDirectorySeparatorChar),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            ancestor = parent;
+        }
 
         foreach (var known in knownFolders)
         {

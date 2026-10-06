@@ -29,7 +29,7 @@
         </Grid>
 
         <Border Grid.Row="1" Margin="0,24,0,14" Padding="14" CornerRadius="10" Background="#FFF8E1" BorderBrush="#F4D77D" BorderThickness="1">
-            <TextBlock Text="Версия 0.2.0-alpha.8: отслеживание перемещений — авто-поиск по известным managed-папкам и ручное «Найти…» с проверкой Windows file ID."
+            <TextBlock Text="Версия 0.2.0-alpha.9: безопасная перепривязка после переноса между дисками через проверенный vault + пароль на удаление защищённой записи."
                        TextWrapping="Wrap"
                        Foreground="#6B5715" />
         </Border>

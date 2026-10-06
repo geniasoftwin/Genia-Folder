@@ -42,6 +42,32 @@ internal static class Program
 
             Pass("stable directory identity survives rename");
 
+            var markerService = new FolderMarkerService();
+            var markerFolderPath = Path.Combine(root, "marker-source");
+            Directory.CreateDirectory(markerFolderPath);
+
+            var markerFolderId = Guid.NewGuid();
+            markerService.EnsureMarker(
+                markerFolderPath,
+                markerFolderId);
+
+            Assert(
+                markerService.Matches(
+                    markerFolderPath,
+                    markerFolderId),
+                "fresh GeniaFolder marker must match its folder ID");
+
+            var markerCopy = Path.Combine(root, "marker-copy");
+            CopyDirectory(markerFolderPath, markerCopy);
+
+            Assert(
+                markerService.Matches(
+                    markerCopy,
+                    markerFolderId),
+                "GeniaFolder marker must survive cross-volume style copy");
+
+            Pass("stable GeniaFolder marker survives copy/delete semantics");
+
             var moveSource = Path.Combine(root, "move-source");
             var managedRoot = Path.Combine(root, "managed-root");
             var movedPath = Path.Combine(managedRoot, "move-source");
@@ -61,6 +87,10 @@ internal static class Program
                 VolumeSerialNumber = moveIdentity.VolumeSerialNumber,
                 FileId = moveIdentity.FileId
             };
+
+            markerService.EnsureMarker(
+                moveSource,
+                movedFolder.Id);
 
             var knownRoot = new ManagedFolder
             {
@@ -89,6 +119,8 @@ internal static class Program
 
             // Simulate MainWindow adopting the moved path, then the user
             // cutting the directory back to its original parent.
+            movedFolder.KnownPaths.Add(
+                Path.GetFullPath(moveSource));
             movedFolder.Path = resolvedMovedPath!;
 
             Directory.Move(
@@ -149,27 +181,48 @@ internal static class Program
                 FileId = sourceIdentity.FileId
             };
 
+            markerService.EnsureMarker(
+                source,
+                folder.Id);
+
             var profilesRoot = Path.Combine(root, "profiles");
             var protection = new ProtectionService(profilesRoot);
             var vault = new VaultEncryptionService();
 
-            var prepared = protection.PrepareStandardProfile(
-                folder,
-                Password);
+            var preparedMaster =
+                protection.PrepareMasterRecoveryKey();
 
-            var recoveryKey = prepared.RecoveryKey;
+            var recoveryKey =
+                preparedMaster.RecoveryKey;
 
             Assert(
-                prepared.IsNewMasterRecoveryKey,
-                "first protected folder must create the installation Master Recovery Key");
+                !protection.HasMasterRecoveryKey,
+                "preparing Master Recovery must not persist it before confirmation");
 
-            await protection.SavePreparedProfileAsync(prepared);
+            await protection.SaveMasterRecoveryKeyAsync(
+                preparedMaster);
 
             Assert(
                 protection.HasMasterRecoveryKey,
-                "Master Recovery metadata must persist after first protected folder");
+                "Master Recovery metadata must persist independently of folders");
 
-            Pass("profile creation and installation Master Recovery persistence");
+            Assert(
+                protection.VerifyMasterRecoveryKey(recoveryKey),
+                "fresh installation Master Recovery Key must verify");
+
+            var prepared = protection.PrepareStandardProfile(
+                folder,
+                Password,
+                recoveryKey);
+
+            Assert(
+                !prepared.IsNewMasterRecoveryKey &&
+                string.IsNullOrEmpty(prepared.RecoveryKey),
+                "folder protection must reuse the separately-created Master Recovery Key");
+
+            await protection.SavePreparedProfileAsync(prepared);
+
+            Pass("installation Master Recovery created before folder profiles");
 
             var secondSource = Path.Combine(root, "second-source");
             Directory.CreateDirectory(secondSource);

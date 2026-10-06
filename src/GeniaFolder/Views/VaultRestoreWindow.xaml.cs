@@ -27,7 +27,8 @@ public partial class VaultRestoreWindow : Window
         string destinationPath,
         ProtectionService protection,
         VaultEncryptionService vault,
-        bool verifyExistingPlaintextOnly = false)
+        bool verifyExistingPlaintextOnly = false,
+        bool relocationVerification = false)
     {
         InitializeComponent();
 
@@ -39,7 +40,9 @@ public partial class VaultRestoreWindow : Window
         _verifyExistingPlaintextOnly = verifyExistingPlaintextOnly;
 
         InfoText.Text = verifyExistingPlaintextOnly
-            ? $"GeniaFolder не будет изменять «{folder.Name}». Существующая plaintext-папка будет byte-for-byte сверена с encrypted vault. Если все SHA-256 совпадут, профиль безопасно завершит прерванную разблокировку."
+            ? relocationVerification
+                ? $"GeniaFolder не будет изменять выбранную папку «{folder.Name}». Её структура и SHA-256 каждого файла будут сверены с authenticated manifest encrypted vault. Только при полном совпадении новый путь будет принят."
+                : $"GeniaFolder не будет изменять «{folder.Name}». Существующая plaintext-папка будет byte-for-byte сверена с encrypted vault. Если все SHA-256 совпадут, профиль безопасно завершит прерванную разблокировку."
             : $"GeniaFolder расшифрует «{folder.Name}» в отдельную новую папку. " +
               "FEK можно разблокировать паролем папки или бумажным Master Recovery Key. " +
               "Каждый AES-GCM блок будет аутентифицирован, а SHA-256 каждого " +
@@ -49,8 +52,17 @@ public partial class VaultRestoreWindow : Window
 
         if (verifyExistingPlaintextOnly)
         {
-            StartButton.Content = "Проверить и завершить разблокировку";
-            StatusText.Text = "Готово к проверке существующей plaintext-папки.";
+            if (relocationVerification)
+            {
+                Title = "Проверка перемещённой папки — GeniaFolder";
+                StartButton.Content = "Проверить и привязать";
+                StatusText.Text = "Готово к криптографической проверке выбранной папки.";
+            }
+            else
+            {
+                StartButton.Content = "Проверить и завершить разблокировку";
+                StatusText.Text = "Готово к проверке существующей plaintext-папки.";
+            }
         }
 
         Loaded += (_, _) => FocusCredentialInput();

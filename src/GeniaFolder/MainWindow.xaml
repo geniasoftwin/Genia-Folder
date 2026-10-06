@@ -73,7 +73,7 @@
                                             Tag="{Binding Id}"
                                             IsEnabled="{Binding ProtectionEnabled}"
                                             Click="Protection_Click" />
-                                    <Button Content="Найти…"
+                                    <Button Content="{Binding FindActionLabel}"
                                             Tag="{Binding Id}"
                                             Visibility="{Binding FindVisibility}"
                                             Click="FindFolder_Click" />

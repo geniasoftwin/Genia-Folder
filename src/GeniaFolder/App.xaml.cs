@@ -4,6 +4,8 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Interop;
 using Forms = System.Windows.Forms;
+using GeniaFolder.Services;
+using GeniaFolder.Views;
 
 namespace GeniaFolder;
 
@@ -63,9 +65,68 @@ public partial class App : System.Windows.Application
             Timeout.Infinite,
             executeOnlyOnce: false);
 
+        var protection = new ProtectionService();
+
+        if (!protection.HasMasterRecoveryKey)
+        {
+            PreparedMasterRecoveryKey preparedMaster;
+
+            try
+            {
+                preparedMaster =
+                    protection.PrepareMasterRecoveryKey();
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(
+                    "Не удалось подготовить Master Recovery Key:\n" +
+                    ex.Message,
+                    "GeniaFolder — первый запуск",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Error);
+
+                Shutdown();
+                return;
+            }
+
+            var masterWindow = new RecoveryKeyWindow(
+                preparedMaster.RecoveryKey,
+                preparedMaster.Fingerprint)
+            {
+                WindowStartupLocation =
+                    System.Windows.WindowStartupLocation.CenterScreen
+            };
+
+            if (masterWindow.ShowDialog() != true)
+            {
+                Shutdown();
+                return;
+            }
+
+            try
+            {
+                protection
+                    .SaveMasterRecoveryKeyAsync(preparedMaster)
+                    .GetAwaiter()
+                    .GetResult();
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(
+                    "Не удалось сохранить настройку Master Recovery Key:\n" +
+                    ex.Message,
+                    "GeniaFolder — первый запуск",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Error);
+
+                Shutdown();
+                return;
+            }
+        }
+
         CreateTrayIcon();
 
-        MainWindow = new MainWindow();
+        MainWindow = new MainWindow(protection);
         MainWindow.Show();
 
         SessionEnding += (_, _) =>

@@ -1476,6 +1476,7 @@ public sealed class VaultEncryptionService
 
     private static bool IsGeneratedRootMetadata(string fileName) =>
         string.Equals(fileName, "desktop.ini", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(fileName, ".geniafolder.id", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(fileName, ".geniafolder.ico", StringComparison.OrdinalIgnoreCase) ||
         (fileName.StartsWith(".geniafolder-", StringComparison.OrdinalIgnoreCase) &&
          fileName.EndsWith(".ico", StringComparison.OrdinalIgnoreCase));

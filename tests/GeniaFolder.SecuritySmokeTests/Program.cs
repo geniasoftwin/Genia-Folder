@@ -275,6 +275,69 @@ internal static class Program
 
             Pass("vault encrypted and fully verified");
 
+            // Simulate a cross-volume round trip without requiring a second
+            // CI drive: copy the bytes aside, delete the original directory
+            // object, then recreate the same registered path from the copy.
+            // Windows must assign a new file ID even though the path/content
+            // are the same.
+            var crossVolumeRoundTripCopy = Path.Combine(
+                root,
+                "cross-volume-roundtrip-copy");
+
+            CopyDirectory(
+                source,
+                crossVolumeRoundTripCopy);
+
+            DeleteTreeBestEffort(source);
+
+            CopyDirectory(
+                crossVolumeRoundTripCopy,
+                source);
+
+            var returnedIdentity = identityProbe.TryGetIdentity(source)
+                ?? throw new InvalidOperationException(
+                    "Could not capture recreated round-trip identity.");
+
+            Assert(
+                returnedIdentity.VolumeSerialNumber !=
+                    folder.VolumeSerialNumber ||
+                !string.Equals(
+                    returnedIdentity.FileId,
+                    folder.FileId,
+                    StringComparison.OrdinalIgnoreCase),
+                "recreated same-path folder must have a new Windows identity");
+
+            var returnedCandidate = new ManagedFolder
+            {
+                Id = folder.Id,
+                Name = folder.Name,
+                Path = source
+            };
+
+            using (var passwordSession =
+                await RequirePasswordSessionAsync(protection, folder.Id))
+            {
+                await vault.VerifySourceMatchesVaultAsync(
+                    returnedCandidate,
+                    built.VaultPath,
+                    passwordSession);
+            }
+
+            using (var recoverySession =
+                await protection.UnlockWithRecoveryKeyAsync(
+                    folder.Id,
+                    recoveryKey)
+                ?? throw new InvalidOperationException(
+                    "Master Recovery failed for cross-volume return candidate."))
+            {
+                await vault.VerifySourceMatchesVaultAsync(
+                    returnedCandidate,
+                    built.VaultPath,
+                    recoverySession);
+            }
+
+            Pass("cross-volume return to original path verified despite new Windows identity");
+
             var relocationCopy = Path.Combine(root, "relocation-copy");
             CopyDirectory(source, relocationCopy);
 

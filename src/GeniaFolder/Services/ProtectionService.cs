@@ -7,7 +7,7 @@ namespace GeniaFolder.Services;
 
 public sealed class ProtectionService
 {
-    public const int MinimumPasswordLength = 12;
+    public const int MinimumPasswordLength = 8;
 
     private const int PasswordIterations = 600_000;
     private const int FekSize = 32;
@@ -19,6 +19,7 @@ public sealed class ProtectionService
         Encoding.UTF8.GetBytes("GeniaFolder Recovery KEK v1");
 
     private readonly string _profilesRoot;
+    private readonly string _masterRecoveryPath;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         WriteIndented = true
@@ -39,6 +40,18 @@ public sealed class ProtectionService
 
         _profilesRoot = Path.GetFullPath(profilesRoot);
         Directory.CreateDirectory(_profilesRoot);
+        _masterRecoveryPath = Path.Combine(
+            _profilesRoot,
+            "master-recovery.json");
+    }
+
+    public bool HasMasterRecoveryKey =>
+        File.Exists(_masterRecoveryPath);
+
+    public string GetMasterRecoveryFingerprint()
+    {
+        var metadata = LoadMasterRecoveryMetadata();
+        return metadata?.Fingerprint ?? string.Empty;
     }
 
     public bool HasPreparedProfile(Guid folderId) =>
@@ -208,7 +221,8 @@ public sealed class ProtectionService
 
     public PreparedProtectionProfile PrepareStandardProfile(
         ManagedFolder folder,
-        string password)
+        string password,
+        string? masterRecoveryKey = null)
     {
         ArgumentNullException.ThrowIfNull(folder);
 
@@ -218,7 +232,75 @@ public sealed class ProtectionService
                 nameof(password));
 
         if (HasPreparedProfile(folder.Id))
-            throw new InvalidOperationException("Для этой папки профиль защиты уже создан.");
+            throw new InvalidOperationException(
+                "Для этой папки профиль защиты уже создан.");
+
+        var existingMaster = LoadMasterRecoveryMetadata();
+        var isNewMaster = existingMaster is null;
+
+        byte[] recoverySecret;
+        string recoveryKeyToDisplay;
+        string masterHashBase64;
+        string masterFingerprint;
+
+        if (isNewMaster)
+        {
+            recoverySecret = RandomNumberGenerator.GetBytes(32);
+            recoveryKeyToDisplay = RecoveryKeyCodec.Encode(recoverySecret);
+
+            var hash = SHA256.HashData(recoverySecret);
+            try
+            {
+                masterHashBase64 = Convert.ToBase64String(hash);
+                masterFingerprint = FormatMasterFingerprint(hash);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(hash);
+            }
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(masterRecoveryKey) ||
+                !RecoveryKeyCodec.TryDecode(
+                    masterRecoveryKey,
+                    out recoverySecret))
+            {
+                throw new InvalidOperationException(
+                    "Введите общий Master Recovery Key этой установки GeniaFolder.");
+            }
+
+            var hash = SHA256.HashData(recoverySecret);
+            try
+            {
+                var expectedHash = Convert.FromBase64String(
+                    existingMaster!.MasterKeyHashBase64);
+
+                try
+                {
+                    if (!CryptographicOperations.FixedTimeEquals(
+                        hash,
+                        expectedHash))
+                    {
+                        throw new InvalidOperationException(
+                            "Master Recovery Key не соответствует этой установке GeniaFolder.");
+                    }
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(expectedHash);
+                }
+
+                masterHashBase64 = existingMaster.MasterKeyHashBase64;
+                masterFingerprint = existingMaster.Fingerprint;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(hash);
+            }
+
+            recoveryKeyToDisplay = string.Empty;
+        }
 
         var profileId = Guid.NewGuid();
         var createdAt = DateTimeOffset.UtcNow;
@@ -226,7 +308,6 @@ public sealed class ProtectionService
         var fek = RandomNumberGenerator.GetBytes(FekSize);
         var passwordSalt = RandomNumberGenerator.GetBytes(SaltSize);
         var recoverySalt = RandomNumberGenerator.GetBytes(SaltSize);
-        var recoverySecret = RandomNumberGenerator.GetBytes(32);
         var passwordBytes = Encoding.UTF8.GetBytes(password);
 
         byte[]? passwordKek = null;
@@ -241,7 +322,9 @@ public sealed class ProtectionService
                 HashAlgorithmName.SHA256,
                 FekSize);
 
-            recoveryKek = DeriveRecoveryKek(recoverySecret, recoverySalt);
+            recoveryKek = DeriveRecoveryKek(
+                recoverySecret,
+                recoverySalt);
 
             var aad = BuildAssociatedData(
                 profileId,
@@ -261,25 +344,41 @@ public sealed class ProtectionService
                     Iterations = PasswordIterations,
                     Salt = Convert.ToBase64String(passwordSalt)
                 },
-                PasswordWrappedFek = WrapKey(fek, passwordKek, aad),
+                PasswordWrappedFek = WrapKey(
+                    fek,
+                    passwordKek,
+                    aad),
                 RecoveryKdf = new RecoveryKdfSettings
                 {
+                    Algorithm = "HMAC-SHA256-master-v1",
                     Salt = Convert.ToBase64String(recoverySalt)
                 },
-                RecoveryWrappedFek = WrapKey(fek, recoveryKek, aad)
+                RecoveryWrappedFek = WrapKey(
+                    fek,
+                    recoveryKek,
+                    aad)
             };
 
-            var recoveryKey = RecoveryKeyCodec.Encode(recoverySecret);
-            var fingerprint = GetProfileFingerprint(profile);
+            var recoveryKeyForVerification = isNewMaster
+                ? recoveryKeyToDisplay
+                : masterRecoveryKey!;
 
-            // Fail closed if either recovery route cannot reproduce the FEK
-            // before anything is persisted.
-            VerifyPreparedProfile(profile, password, recoveryKey, fek);
+            var profileFingerprint =
+                GetProfileFingerprint(profile);
+
+            VerifyPreparedProfile(
+                profile,
+                password,
+                recoveryKeyForVerification,
+                fek);
 
             return new PreparedProtectionProfile(
                 profile,
-                recoveryKey,
-                fingerprint);
+                recoveryKeyToDisplay,
+                profileFingerprint,
+                masterFingerprint,
+                masterHashBase64,
+                isNewMaster);
         }
         finally
         {
@@ -297,12 +396,69 @@ public sealed class ProtectionService
         }
     }
 
-    public async Task SavePreparedProfileAsync(ProtectionProfile profile)
+    public async Task SavePreparedProfileAsync(
+        PreparedProtectionProfile prepared)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+
+        if (File.Exists(GetProfilePath(prepared.Profile.FolderId)))
+        {
+            throw new InvalidOperationException(
+                "Профиль защиты уже существует.");
+        }
+
+        var existingMaster = LoadMasterRecoveryMetadata();
+
+        if (prepared.IsNewMasterRecoveryKey)
+        {
+            if (existingMaster is null)
+            {
+                await SaveMasterRecoveryMetadataAtomicAsync(
+                    new MasterRecoveryMetadata
+                    {
+                        FormatVersion = 1,
+                        MasterKeyHashBase64 =
+                            prepared.MasterRecoveryHashBase64,
+                        Fingerprint =
+                            prepared.MasterRecoveryFingerprint,
+                        CreatedAt = DateTimeOffset.UtcNow
+                    });
+            }
+            else if (!string.Equals(
+                existingMaster.MasterKeyHashBase64,
+                prepared.MasterRecoveryHashBase64,
+                StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Общий Master Recovery Key уже был создан другой операцией.");
+            }
+        }
+        else
+        {
+            if (existingMaster is null ||
+                !string.Equals(
+                    existingMaster.MasterKeyHashBase64,
+                    prepared.MasterRecoveryHashBase64,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Метаданные общего Master Recovery Key отсутствуют или изменились.");
+            }
+        }
+
+        await SaveProfileAtomicAsync(
+            prepared.Profile,
+            overwrite: false);
+    }
+
+    public async Task SavePreparedProfileAsync(
+        ProtectionProfile profile)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
         if (File.Exists(GetProfilePath(profile.FolderId)))
-            throw new InvalidOperationException("Профиль защиты уже существует.");
+            throw new InvalidOperationException(
+                "Профиль защиты уже существует.");
 
         await SaveProfileAtomicAsync(profile, overwrite: false);
     }
@@ -392,6 +548,77 @@ public sealed class ProtectionService
         return await JsonSerializer.DeserializeAsync<ProtectionProfile>(
             stream,
             _jsonOptions);
+    }
+
+    private MasterRecoveryMetadata? LoadMasterRecoveryMetadata()
+    {
+        if (!File.Exists(_masterRecoveryPath))
+            return null;
+
+        using var stream = File.OpenRead(_masterRecoveryPath);
+        var metadata = JsonSerializer.Deserialize<MasterRecoveryMetadata>(
+            stream,
+            _jsonOptions);
+
+        if (metadata is null ||
+            metadata.FormatVersion != 1 ||
+            string.IsNullOrWhiteSpace(metadata.MasterKeyHashBase64) ||
+            string.IsNullOrWhiteSpace(metadata.Fingerprint))
+        {
+            throw new InvalidDataException(
+                "Метаданные Master Recovery Key повреждены.");
+        }
+
+        return metadata;
+    }
+
+    private async Task SaveMasterRecoveryMetadataAtomicAsync(
+        MasterRecoveryMetadata metadata)
+    {
+        var temp = _masterRecoveryPath +
+            ".tmp-" +
+            Guid.NewGuid().ToString("N");
+
+        try
+        {
+            await using (var stream = new FileStream(
+                temp,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                4096,
+                FileOptions.WriteThrough))
+            {
+                await JsonSerializer.SerializeAsync(
+                    stream,
+                    metadata,
+                    _jsonOptions);
+
+                await stream.FlushAsync();
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(
+                temp,
+                _masterRecoveryPath,
+                overwrite: false);
+        }
+        finally
+        {
+            if (File.Exists(temp))
+                File.Delete(temp);
+        }
+    }
+
+    private static string FormatMasterFingerprint(
+        ReadOnlySpan<byte> hash)
+    {
+        var hex = Convert.ToHexString(hash[..8]);
+
+        return string.Join(
+            "-",
+            hex.Chunk(4)
+                .Select(chars => new string(chars)));
     }
 
     private async Task SaveProfileAtomicAsync(
@@ -791,10 +1018,21 @@ public sealed class ProtectionService
     }
 }
 
+internal sealed class MasterRecoveryMetadata
+{
+    public int FormatVersion { get; set; } = 1;
+    public string MasterKeyHashBase64 { get; set; } = string.Empty;
+    public string Fingerprint { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 public sealed record PreparedProtectionProfile(
     ProtectionProfile Profile,
     string RecoveryKey,
-    string Fingerprint);
+    string Fingerprint,
+    string MasterRecoveryFingerprint,
+    string MasterRecoveryHashBase64,
+    bool IsNewMasterRecoveryKey);
 
 
 public sealed class UnlockedProtectionSession : IDisposable

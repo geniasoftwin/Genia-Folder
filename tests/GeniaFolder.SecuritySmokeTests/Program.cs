@@ -131,8 +131,78 @@ internal static class Program
 
             var recoveryKey = prepared.RecoveryKey;
 
-            await protection.SavePreparedProfileAsync(prepared.Profile);
-            Pass("profile creation and atomic persistence");
+            Assert(
+                prepared.IsNewMasterRecoveryKey,
+                "first protected folder must create the installation Master Recovery Key");
+
+            await protection.SavePreparedProfileAsync(prepared);
+
+            Assert(
+                protection.HasMasterRecoveryKey,
+                "Master Recovery metadata must persist after first protected folder");
+
+            Pass("profile creation and installation Master Recovery persistence");
+
+            var secondSource = Path.Combine(root, "second-source");
+            Directory.CreateDirectory(secondSource);
+            await File.WriteAllTextAsync(
+                Path.Combine(secondSource, "second.txt"),
+                "Independent FEK, same installation recovery root.",
+                Encoding.UTF8);
+
+            var secondFolder = new ManagedFolder
+            {
+                Id = Guid.NewGuid(),
+                Name = "Second protected folder",
+                Path = secondSource
+            };
+
+            const string eightCharacterPassword = "Eight888";
+
+            var secondPrepared = protection.PrepareStandardProfile(
+                secondFolder,
+                eightCharacterPassword,
+                recoveryKey);
+
+            Assert(
+                !secondPrepared.IsNewMasterRecoveryKey &&
+                string.IsNullOrEmpty(secondPrepared.RecoveryKey),
+                "later folders must reuse the existing Master Recovery Key");
+
+            Assert(
+                string.Equals(
+                    prepared.MasterRecoveryFingerprint,
+                    secondPrepared.MasterRecoveryFingerprint,
+                    StringComparison.Ordinal),
+                "all folders in one installation must share the Master Recovery fingerprint");
+
+            await protection.SavePreparedProfileAsync(secondPrepared);
+
+            using (var secondPasswordSession =
+                await protection.UnlockWithPasswordAsync(
+                    secondFolder.Id,
+                    eightCharacterPassword)
+                ?? throw new InvalidOperationException(
+                    "8-character password failed to unlock second FEK."))
+            {
+                Assert(
+                    secondPasswordSession.FolderId == secondFolder.Id,
+                    "second folder password unlocked wrong profile");
+            }
+
+            using (var secondRecoverySession =
+                await protection.UnlockWithRecoveryKeyAsync(
+                    secondFolder.Id,
+                    recoveryKey)
+                ?? throw new InvalidOperationException(
+                    "shared Master Recovery Key failed to unlock second FEK."))
+            {
+                Assert(
+                    secondRecoverySession.FolderId == secondFolder.Id,
+                    "shared Master Recovery unlocked wrong second profile");
+            }
+
+            Pass("one Master Recovery Key unlocks independent folder FEKs; 8-character password accepted");
 
             var wrongPasswordSession = await protection.UnlockWithPasswordAsync(
                 folder.Id,

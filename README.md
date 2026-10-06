@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.10
+## Current version: 0.2.0-alpha.11
 
 Implemented:
 
@@ -196,3 +196,10 @@ GeniaFolder now uses one paper Master Recovery Key per local installation.
 - Later folders require the same paper Master Recovery Key during protection setup; a new paper key is not generated.
 - The same Master Recovery Key can recover every folder enrolled under that installation, while each folder password remains independent.
 - Minimum folder password length is now 8 characters; the UI recommends 12+.
+
+
+## 0.2.0-alpha.11 round-trip folder moves
+
+Folder location recovery now searches the last known parent and a bounded chain of ancestor directories, in addition to known managed folders. Each search root is checked only at the direct-child level; GeniaFolder still does not recursively scan an entire drive.
+
+This fixes the round-trip case where a tracked folder is moved into another managed folder, adopted at the nested path, and later moved back to its original parent. The stable Windows volume/file ID is used to prove identity before the registry path is updated.

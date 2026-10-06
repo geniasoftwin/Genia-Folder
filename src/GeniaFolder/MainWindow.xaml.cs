@@ -95,8 +95,21 @@ public partial class MainWindow : Window
                     string.IsNullOrWhiteSpace(folder.FileId))
                 {
                     changed |= CaptureFolderIdentity(folder);
+                    continue;
                 }
 
+                // A path can reappear after a cross-volume move/copy with a
+                // different Windows file ID. Never silently trust the path.
+                if (_folderIdentity.Matches(
+                    folder.Path,
+                    folder.VolumeSerialNumber,
+                    folder.FileId))
+                {
+                    continue;
+                }
+
+                // Keep the stored identity unchanged. The UI will require an
+                // explicit identity/content verification before rebinding.
                 continue;
             }
 
@@ -188,6 +201,23 @@ public partial class MainWindow : Window
             var storageState =
                 storageInfo?.State ?? VaultStorageState.PlaintextPresent;
 
+            var identityKnown =
+                folder.VolumeSerialNumber != 0 &&
+                !string.IsNullOrWhiteSpace(folder.FileId);
+
+            var identityMatches =
+                !exists ||
+                !identityKnown ||
+                _folderIdentity.Matches(
+                    folder.Path,
+                    folder.VolumeSerialNumber,
+                    folder.FileId);
+
+            var identityMismatch =
+                exists &&
+                identityKnown &&
+                !identityMatches;
+
             string status;
             MediaBrush statusBrush;
             string protectionAction;
@@ -226,50 +256,71 @@ public partial class MainWindow : Window
             }
             else
             {
-                status = !exists && vaultVerified && vaultAvailable
-                    ? "Исходная папка отсутствует · encrypted vault доступен для восстановления"
-                    : !exists
-                        ? "Папка не найдена или диск недоступен"
-                        : vaultVerified && vaultAvailable
-                            ? "Зашифрованная копия проверена · оригиналы пока на месте"
-                            : vaultVerified
-                                ? "Vault зарегистрирован, но сейчас не найден · оригиналы пока на месте"
-                                : protectionPrepared
-                                    ? "Ключи Standard готовы · файлы пока НЕ зашифрованы"
-                                    : folder.ProtectionLabel;
+                if (identityMismatch)
+                {
+                    status = vaultVerified && vaultAvailable
+                        ? "Путь существует, но Windows identity изменился · требуется проверка по encrypted vault"
+                        : "Путь существует, но Windows identity изменился · требуется перепривязка";
 
-                statusBrush = !exists && vaultVerified && vaultAvailable
-                    ? Brushes.DarkGoldenrod
-                    : !exists
-                        ? Brushes.Firebrick
-                        : vaultVerified && vaultAvailable
-                            ? Brushes.DarkGreen
-                            : vaultVerified
-                                ? Brushes.Firebrick
-                                : protectionPrepared
-                                    ? Brushes.DarkGoldenrod
-                                    : Brushes.Gray;
+                    statusBrush = vaultVerified && vaultAvailable
+                        ? Brushes.DarkGoldenrod
+                        : Brushes.Firebrick;
 
-                protectionAction = vaultVerified
-                    ? "Vault"
-                    : protectionPrepared
-                        ? "Шифровать"
-                        : "Защита";
+                    protectionAction = vaultVerified
+                        ? "Vault"
+                        : protectionPrepared
+                            ? "Защита"
+                            : "Защита";
 
-                protectionEnabled = vaultVerified
-                    ? vaultAvailable
-                    : exists;
+                    protectionEnabled = vaultVerified && vaultAvailable;
+                    cardOpacity = 1.0;
+                }
+                else
+                {
+                    status = !exists && vaultVerified && vaultAvailable
+                        ? "Исходная папка отсутствует · encrypted vault доступен для восстановления"
+                        : !exists
+                            ? "Папка не найдена или диск недоступен"
+                            : vaultVerified && vaultAvailable
+                                ? "Зашифрованная копия проверена · оригиналы пока на месте"
+                                : vaultVerified
+                                    ? "Vault зарегистрирован, но сейчас не найден · оригиналы пока на месте"
+                                    : protectionPrepared
+                                        ? "Ключи Standard готовы · файлы пока НЕ зашифрованы"
+                                        : folder.ProtectionLabel;
 
-                cardOpacity = vaultVerified && vaultAvailable
-                    ? 1.0
-                    : exists ? 1.0 : 0.72;
+                    statusBrush = !exists && vaultVerified && vaultAvailable
+                        ? Brushes.DarkGoldenrod
+                        : !exists
+                            ? Brushes.Firebrick
+                            : vaultVerified && vaultAvailable
+                                ? Brushes.DarkGreen
+                                : vaultVerified
+                                    ? Brushes.Firebrick
+                                    : protectionPrepared
+                                        ? Brushes.DarkGoldenrod
+                                        : Brushes.Gray;
+
+                    protectionAction = vaultVerified
+                        ? "Vault"
+                        : protectionPrepared
+                            ? "Шифровать"
+                            : "Защита";
+
+                    protectionEnabled = vaultVerified
+                        ? vaultAvailable
+                        : exists;
+
+                    cardOpacity = vaultVerified && vaultAvailable
+                        ? 1.0
+                        : exists ? 1.0 : 0.72;
+                }
             }
 
             var canLocateMovedFolder =
-                !exists &&
                 storageState == VaultStorageState.PlaintextPresent &&
-                folder.VolumeSerialNumber != 0 &&
-                !string.IsNullOrWhiteSpace(folder.FileId);
+                (!exists || identityMismatch) &&
+                (identityKnown || (vaultVerified && vaultAvailable));
 
             _rows.Add(new FolderRow(
                 folder.Id,
@@ -277,7 +328,7 @@ public partial class MainWindow : Window
                 folder.Path,
                 new SolidColorBrush(FolderAppearanceService.GetColor(folder.Color)),
                 status,
-                exists,
+                exists && !identityMismatch,
                 statusBrush,
                 cardOpacity,
                 protectionAction,
@@ -559,18 +610,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (folder.VolumeSerialNumber == 0 ||
-            string.IsNullOrWhiteSpace(folder.FileId))
-        {
-            MessageBox.Show(this,
-                "Для этой старой записи ещё нет сохранённого Windows file ID. " +
-                "Автоматически доказать, что выбранная папка — именно исходная, невозможно.",
-                "GeniaFolder",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-            return;
-        }
-
         var dialog = new OpenFolderDialog
         {
             Title = $"Найдите перемещённую папку «{folder.Name}»",
@@ -581,20 +620,6 @@ public partial class MainWindow : Window
             return;
 
         var selectedPath = Path.GetFullPath(dialog.FolderName);
-
-        if (!_folderIdentity.Matches(
-            selectedPath,
-            folder.VolumeSerialNumber,
-            folder.FileId))
-        {
-            MessageBox.Show(this,
-                "Выбранная папка не является той же самой папкой Windows: file ID не совпадает.\n\n" +
-                "GeniaFolder не будет перепривязывать защищённую запись к похожей папке или копии.",
-                "GeniaFolder — другая папка",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-            return;
-        }
 
         if (_folders.Any(f =>
             f.Id != folder.Id &&
@@ -612,15 +637,83 @@ public partial class MainWindow : Window
             return;
         }
 
+        var sameWindowsIdentity =
+            folder.VolumeSerialNumber != 0 &&
+            !string.IsNullOrWhiteSpace(folder.FileId) &&
+            _folderIdentity.Matches(
+                selectedPath,
+                folder.VolumeSerialNumber,
+                folder.FileId);
+
+        if (!sameWindowsIdentity)
+        {
+            var vaultInfo = _protection.HasPreparedProfile(folder.Id)
+                ? _protection.GetVaultInfo(folder.Id)
+                : null;
+
+            var vaultAvailable =
+                vaultInfo?.State == VaultCopyState.VerifiedCopy &&
+                !string.IsNullOrWhiteSpace(vaultInfo.Path) &&
+                Directory.Exists(vaultInfo.Path);
+
+            if (!vaultAvailable)
+            {
+                MessageBox.Show(this,
+                    "Windows file ID выбранной папки не совпадает, а проверенного encrypted vault нет. " +
+                    "GeniaFolder не может безопасно доказать, что это та же папка.",
+                    "GeniaFolder — требуется проверка",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            var selectedName =
+                Path.GetFileName(
+                    selectedPath.TrimEnd(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar));
+
+            var candidate = new ManagedFolder
+            {
+                Id = folder.Id,
+                Name = string.IsNullOrWhiteSpace(selectedName)
+                    ? folder.Name
+                    : selectedName,
+                Path = selectedPath,
+                Color = folder.Color,
+                Protection = folder.Protection,
+                AddedAt = folder.AddedAt
+            };
+
+            var verify = new VaultRestoreWindow(
+                candidate,
+                vaultInfo!.Path,
+                selectedPath,
+                _protection,
+                _vaultEncryption,
+                verifyExistingPlaintextOnly: true,
+                relocationVerification: true)
+            {
+                Owner = this
+            };
+
+            if (verify.ShowDialog() != true)
+                return;
+        }
+
         UpdateManagedFolderPath(
             folder,
             selectedPath);
+
+        CaptureFolderIdentity(folder);
 
         await _registry.SaveAsync(_folders);
         RebuildRows();
 
         MessageBox.Show(this,
-            $"Папка найдена и путь обновлён:\n{folder.Path}",
+            sameWindowsIdentity
+                ? $"Папка найдена и путь обновлён:\n{folder.Path}"
+                : $"Содержимое полностью совпало с encrypted vault. Новый путь и Windows identity сохранены:\n{folder.Path}",
             "GeniaFolder",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
@@ -665,7 +758,31 @@ public partial class MainWindow : Window
             return false;
 
         if (Directory.Exists(folder.Path))
-            return true;
+        {
+            var identityKnown =
+                folder.VolumeSerialNumber != 0 &&
+                !string.IsNullOrWhiteSpace(folder.FileId);
+
+            if (!identityKnown ||
+                _folderIdentity.Matches(
+                    folder.Path,
+                    folder.VolumeSerialNumber,
+                    folder.FileId))
+            {
+                return true;
+            }
+
+            RebuildRows();
+
+            MessageBox.Show(this,
+                "По сохранённому пути сейчас находится папка с другим Windows identity. " +
+                "Используйте «Найти…» и подтвердите её по encrypted vault перед открытием.",
+                "GeniaFolder — путь требует проверки",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+
+            return false;
+        }
 
         RebuildRows();
         ShowFolderUnavailable(folder);

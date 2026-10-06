@@ -42,6 +42,51 @@ internal static class Program
 
             Pass("stable directory identity survives rename");
 
+            var moveSource = Path.Combine(root, "move-source");
+            var managedRoot = Path.Combine(root, "managed-root");
+            var movedPath = Path.Combine(managedRoot, "move-source");
+
+            Directory.CreateDirectory(moveSource);
+            Directory.CreateDirectory(managedRoot);
+
+            var moveIdentity = identityProbe.TryGetIdentity(moveSource)
+                ?? throw new InvalidOperationException(
+                    "Could not capture move-source identity.");
+
+            var movedFolder = new ManagedFolder
+            {
+                Id = Guid.NewGuid(),
+                Name = "move-source",
+                Path = moveSource,
+                VolumeSerialNumber = moveIdentity.VolumeSerialNumber,
+                FileId = moveIdentity.FileId
+            };
+
+            var knownRoot = new ManagedFolder
+            {
+                Id = Guid.NewGuid(),
+                Name = "managed-root",
+                Path = managedRoot
+            };
+
+            Directory.Move(moveSource, movedPath);
+
+            var resolver = new FolderLocationResolverService(
+                identityProbe);
+
+            var resolvedMovedPath = resolver.TryResolve(
+                movedFolder,
+                [movedFolder, knownRoot]);
+
+            Assert(
+                string.Equals(
+                    Path.GetFullPath(movedPath),
+                    resolvedMovedPath,
+                    StringComparison.OrdinalIgnoreCase),
+                "moved folder inside known managed root was not resolved");
+
+            Pass("moved folder resolved inside known managed root");
+
             var source = Path.Combine(root, "source");
             var nested = Path.Combine(source, "nested");
             Directory.CreateDirectory(nested);

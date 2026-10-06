@@ -60,8 +60,8 @@ public sealed class FolderAppearanceService
                 ini);
 
             // desktop.ini is only honored for customized folders when the
-            // shell customization attribute is present.
-            PathMakeSystemFolder(folderPath);
+            // shell customization attributes are present.
+            EnsureCustomizationAttributes(folderPath);
 
             CleanupLegacyFlatIcon(folderPath);
             CleanupLegacyMetadataDirectory(folderPath);
@@ -147,12 +147,12 @@ public sealed class FolderAppearanceService
         try
         {
             var attributes = File.GetAttributes(folderPath);
-            if ((attributes & FileAttributes.System) != 0)
-            {
-                File.SetAttributes(
-                    folderPath,
-                    attributes & ~FileAttributes.System);
-            }
+
+            File.SetAttributes(
+                folderPath,
+                attributes &
+                ~FileAttributes.System &
+                ~FileAttributes.ReadOnly);
         }
         catch
         {
@@ -180,6 +180,23 @@ public sealed class FolderAppearanceService
 
     private static string GetIconFileName(FolderColor color) =>
         $".geniafolder-{color.ToString().ToLowerInvariant()}-{Guid.NewGuid():N}.ico";
+
+    private static void EnsureCustomizationAttributes(
+        string folderPath)
+    {
+        // PathMakeSystemFolder is the shell-native operation. Explicitly
+        // preserve both customization bits as well because Explorer behavior
+        // varies between Windows builds and views.
+        PathMakeSystemFolder(folderPath);
+
+        var attributes = File.GetAttributes(folderPath);
+
+        File.SetAttributes(
+            folderPath,
+            attributes |
+            FileAttributes.System |
+            FileAttributes.ReadOnly);
+    }
 
     private static void RefreshExplorer(string folderPath)
     {

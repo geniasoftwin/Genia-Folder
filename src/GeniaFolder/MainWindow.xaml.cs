@@ -16,17 +16,22 @@ public partial class MainWindow : Window
     private readonly FolderRegistryService _registry = new();
     private readonly FolderAppearanceService _appearance = new();
     private readonly FolderIdentityService _folderIdentity = new();
+    private readonly FolderMarkerService _folderMarkers = new();
     private readonly FolderLocationResolverService _folderLocationResolver;
-    private readonly ProtectionService _protection = new();
+    private readonly ProtectionService _protection;
     private readonly VaultEncryptionService _vaultEncryption = new();
     private readonly ObservableCollection<FolderRow> _rows = [];
     private List<ManagedFolder> _folders = [];
     private bool _refreshingFolderLocations;
 
-    public MainWindow()
+    public MainWindow(ProtectionService protection)
     {
+        _protection = protection ??
+            throw new ArgumentNullException(nameof(protection));
+
         _folderLocationResolver = new FolderLocationResolverService(
-            _folderIdentity);
+            _folderIdentity,
+            _folderMarkers);
 
         InitializeComponent();
         FolderList.ItemsSource = _rows;
@@ -84,13 +89,32 @@ public partial class MainWindow : Window
 
         foreach (var folder in _folders)
         {
-            var storageState = _protection.HasPreparedProfile(folder.Id)
+            folder.KnownPaths ??= [];
+
+            var protectionPrepared =
+                _protection.HasPreparedProfile(folder.Id);
+
+            var storageState = protectionPrepared
                 ? _protection.GetStorageInfo(folder.Id)?.State
                     ?? VaultStorageState.PlaintextPresent
                 : VaultStorageState.PlaintextPresent;
 
             if (Directory.Exists(folder.Path))
             {
+                try
+                {
+                    if (_folderMarkers.TryReadFolderId(folder.Path) is null)
+                    {
+                        _folderMarkers.EnsureMarker(
+                            folder.Path,
+                            folder.Id);
+                    }
+                }
+                catch
+                {
+                    // A conflicting/corrupt marker is never silently replaced.
+                }
+
                 if (folder.VolumeSerialNumber == 0 ||
                     string.IsNullOrWhiteSpace(folder.FileId))
                 {
@@ -98,9 +122,6 @@ public partial class MainWindow : Window
                     continue;
                 }
 
-                // A path can reappear after a cross-volume move/copy with a
-                // different Windows file ID. Same-volume moves preserve the
-                // identity; cross-volume copy/delete semantics do not.
                 if (_folderIdentity.Matches(
                     folder.Path,
                     folder.VolumeSerialNumber,
@@ -109,31 +130,25 @@ public partial class MainWindow : Window
                     continue;
                 }
 
-                // For an unprotected entry, returning to the exact registered
-                // path is enough to adopt the new filesystem identity. There
-                // is no cryptographic object bound to this entry.
-                if (storageState == VaultStorageState.PlaintextPresent &&
-                    !_protection.HasPreparedProfile(folder.Id))
+                // For an unprotected folder a matching GeniaFolder marker at
+                // the registered path is enough to adopt a new Windows ID
+                // after cross-volume copy/delete semantics.
+                if (!protectionPrepared &&
+                    _folderMarkers.Matches(
+                        folder.Path,
+                        folder.Id))
                 {
                     changed |= CaptureFolderIdentity(folder);
-                    continue;
                 }
 
-                // Protected entries fail closed: the path is visible as a
-                // relocation candidate, but the user must authenticate (and,
-                // when a verified vault exists, pass a full content check)
-                // before the new Windows identity is persisted.
+                // Protected entries fail closed. RebuildRows exposes
+                // "Проверить…" and the new identity is persisted only after
+                // password/Master + optional vault verification.
                 continue;
             }
 
-            // In Vault-only/LockPending the missing plaintext path is expected
-            // and must never be "repaired" by adopting another directory.
-            if (storageState != VaultStorageState.PlaintextPresent ||
-                folder.VolumeSerialNumber == 0 ||
-                string.IsNullOrWhiteSpace(folder.FileId))
-            {
+            if (storageState != VaultStorageState.PlaintextPresent)
                 continue;
-            }
 
             var resolvedPath = _folderLocationResolver.TryResolve(
                 folder,
@@ -142,9 +157,50 @@ public partial class MainWindow : Window
             if (resolvedPath is null)
                 continue;
 
+            var sameWindowsIdentity =
+                folder.VolumeSerialNumber != 0 &&
+                !string.IsNullOrWhiteSpace(folder.FileId) &&
+                _folderIdentity.Matches(
+                    resolvedPath,
+                    folder.VolumeSerialNumber,
+                    folder.FileId);
+
+            var markerMatches =
+                _folderMarkers.Matches(
+                    resolvedPath,
+                    folder.Id);
+
+            // A protected cross-volume copy is recognized by our stable
+            // marker/history, but its new Windows identity stays untrusted
+            // until the user explicitly verifies it.
+            if (protectionPrepared &&
+                !sameWindowsIdentity &&
+                !markerMatches)
+            {
+                continue;
+            }
+
             UpdateManagedFolderPath(
                 folder,
                 resolvedPath);
+
+            if (!protectionPrepared || sameWindowsIdentity)
+            {
+                changed |= CaptureFolderIdentity(folder);
+            }
+
+            try
+            {
+                if (_folderMarkers.TryReadFolderId(folder.Path) is null)
+                {
+                    _folderMarkers.EnsureMarker(
+                        folder.Path,
+                        folder.Id);
+                }
+            }
+            catch
+            {
+            }
 
             changed = true;
         }
@@ -157,6 +213,29 @@ public partial class MainWindow : Window
         string path)
     {
         var fullPath = Path.GetFullPath(path);
+
+        folder.KnownPaths ??= [];
+
+        if (!string.IsNullOrWhiteSpace(folder.Path))
+        {
+            var previous = Path.GetFullPath(folder.Path);
+
+            if (!string.Equals(
+                previous,
+                fullPath,
+                StringComparison.OrdinalIgnoreCase) &&
+                !folder.KnownPaths.Any(p =>
+                    string.Equals(
+                        Path.GetFullPath(p),
+                        previous,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                folder.KnownPaths.Add(previous);
+
+                if (folder.KnownPaths.Count > 16)
+                    folder.KnownPaths.RemoveAt(0);
+            }
+        }
 
         folder.Path = fullPath;
         folder.Name =
@@ -359,6 +438,23 @@ public partial class MainWindow : Window
         }
     }
 
+    private void MasterRecovery_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        var fingerprint =
+            _protection.GetMasterRecoveryFingerprint();
+
+        MessageBox.Show(this,
+            "Master Recovery Key создан на уровне всей установки GeniaFolder и не зависит от отдельных папок.\n\n" +
+            $"Fingerprint: {fingerprint}\n\n" +
+            "Сам бумажный секрет в открытом виде на компьютере не хранится, поэтому повторно показать его нельзя. " +
+            "Fingerprint можно использовать для сверки бумажной записи.",
+            "GeniaFolder — Master Recovery",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+    }
+
     private async void AddFolder_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog { Title = "Выберите папку для GeniaFolder" };
@@ -389,31 +485,72 @@ public partial class MainWindow : Window
     {
         path = Path.GetFullPath(path);
 
-        if (_folders.Any(f => string.Equals(Path.GetFullPath(f.Path), path, StringComparison.OrdinalIgnoreCase)))
+        if (_folders.Any(f =>
+            string.Equals(
+                Path.GetFullPath(f.Path),
+                path,
+                StringComparison.OrdinalIgnoreCase)))
         {
-            MessageBox.Show(this, "Эта папка уже добавлена.", "GeniaFolder", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this,
+                "Эта папка уже добавлена.",
+                "GeniaFolder",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
             return;
         }
 
-        var folder = new ManagedFolder
-        {
-            Name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } name ? name : path,
-            Path = path,
-            Color = FolderColor.Blue
-        };
-
-        CaptureFolderIdentity(folder);
-
         try
         {
-            await _appearance.ApplyColorAsync(path, folder.Color);
+            var markerId = _folderMarkers.TryReadFolderId(path);
+
+            if (markerId is Guid existingId &&
+                _folders.Any(f => f.Id == existingId))
+            {
+                MessageBox.Show(this,
+                    "У этой папки тот же GeniaFolder ID, что у уже зарегистрированной записи. " +
+                    "Это может быть копия managed-папки; GeniaFolder не будет создавать дубликат автоматически.",
+                    "GeniaFolder — дубликат ID",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            var folder = new ManagedFolder
+            {
+                Id = markerId ?? Guid.NewGuid(),
+                Name =
+                    Path.GetFileName(
+                        path.TrimEnd(
+                            Path.DirectorySeparatorChar,
+                            Path.AltDirectorySeparatorChar))
+                    is { Length: > 0 } name
+                        ? name
+                        : path,
+                Path = path,
+                Color = FolderColor.Blue
+            };
+
+            _folderMarkers.EnsureMarker(
+                path,
+                folder.Id);
+
+            CaptureFolderIdentity(folder);
+
+            await _appearance.ApplyColorAsync(
+                path,
+                folder.Color);
+
             _folders.Add(folder);
             await _registry.SaveAsync(_folders);
             RebuildRows();
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Не удалось добавить папку:\n{ex.Message}", "GeniaFolder", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this,
+                $"Не удалось добавить папку:\n{ex.Message}",
+                "GeniaFolder",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 
@@ -865,6 +1002,25 @@ public partial class MainWindow : Window
 
         if (result != MessageBoxResult.Yes)
             return;
+
+        if (Directory.Exists(folder.Path))
+        {
+            try
+            {
+                await _appearance.RemoveCustomizationAsync(
+                    folder.Path);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this,
+                    "Не удалось убрать оформление GeniaFolder. Запись оставлена в программе, чтобы не получить полусостояние.\n\n" +
+                    ex.Message,
+                    "GeniaFolder — оформление",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                return;
+            }
+        }
 
         _folders.Remove(folder);
         await _registry.SaveAsync(_folders);

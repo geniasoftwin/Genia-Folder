@@ -23,6 +23,7 @@
                 <TextBlock Text="Умные цветные папки Windows" Margin="0,4,0,0" Foreground="{StaticResource TextSecondary}" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Content="Master Key" Click="MasterRecovery_Click" />
                 <Button Content="Добавить папку" Click="AddFolder_Click" />
                 <Button Content="Создать папку" Click="CreateFolder_Click" />
             </StackPanel>

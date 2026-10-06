@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.7
+## Current version: 0.2.0-alpha.8
 
 Implemented:
 
@@ -161,3 +161,14 @@ GeniaFolder does not claim physical secure erase of SSD/NVMe blocks. Vault-only 
 Managed folders now store the Windows filesystem identity of the directory (volume serial + file ID). If a plaintext folder is renamed in Explorer within the same parent directory, GeniaFolder can recognize the same directory and update its saved name/path automatically instead of treating it as deleted.
 
 Legacy entries migrate automatically the next time their folder is available. Vault-only and LockPending states deliberately skip rename recovery because a missing plaintext path is expected there.
+
+
+## 0.2.0-alpha.8 moved-folder recovery
+
+Folder identity tracking now handles more than same-parent renames:
+
+- if a missing plaintext folder was moved directly inside another folder already managed by GeniaFolder, the app can resolve it automatically by Windows volume serial + file ID;
+- missing plaintext cards with a stored identity show a `Найти…` action;
+- manual location is accepted only when the selected directory has the exact same Windows identity;
+- look-alike folders, copies and cross-volume moves are not silently rebound;
+- Vault-only and LockPending still disable plaintext relocation recovery because a missing plaintext path is expected in those states.

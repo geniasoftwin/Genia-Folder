@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private readonly FolderRegistryService _registry = new();
     private readonly FolderAppearanceService _appearance = new();
     private readonly FolderIdentityService _folderIdentity = new();
+    private readonly FolderLocationResolverService _folderLocationResolver;
     private readonly ProtectionService _protection = new();
     private readonly VaultEncryptionService _vaultEncryption = new();
     private readonly ObservableCollection<FolderRow> _rows = [];
@@ -24,6 +25,9 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        _folderLocationResolver = new FolderLocationResolverService(
+            _folderIdentity);
+
         InitializeComponent();
         FolderList.ItemsSource = _rows;
 
@@ -105,55 +109,38 @@ public partial class MainWindow : Window
                 continue;
             }
 
-            var parent = Directory.GetParent(folder.Path)?.FullName;
-            if (string.IsNullOrWhiteSpace(parent) ||
-                !Directory.Exists(parent))
-            {
-                continue;
-            }
+            var resolvedPath = _folderLocationResolver.TryResolve(
+                folder,
+                _folders);
 
-            string? renamedPath = null;
-
-            try
-            {
-                foreach (var candidate in Directory.EnumerateDirectories(
-                    parent,
-                    "*",
-                    SearchOption.TopDirectoryOnly))
-                {
-                    if (_folderIdentity.Matches(
-                        candidate,
-                        folder.VolumeSerialNumber,
-                        folder.FileId))
-                    {
-                        renamedPath = Path.GetFullPath(candidate);
-                        break;
-                    }
-                }
-            }
-            catch
-            {
-                // Availability/status handling remains unchanged if the parent
-                // cannot be enumerated (offline/network/access denied).
-            }
-
-            if (renamedPath is null)
+            if (resolvedPath is null)
                 continue;
 
-            folder.Path = renamedPath;
-            folder.Name =
-                Path.GetFileName(
-                    renamedPath.TrimEnd(
-                        Path.DirectorySeparatorChar,
-                        Path.AltDirectorySeparatorChar))
-                is { Length: > 0 } name
-                    ? name
-                    : renamedPath;
+            UpdateManagedFolderPath(
+                folder,
+                resolvedPath);
 
             changed = true;
         }
 
         return changed;
+    }
+
+    private static void UpdateManagedFolderPath(
+        ManagedFolder folder,
+        string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+
+        folder.Path = fullPath;
+        folder.Name =
+            Path.GetFileName(
+                fullPath.TrimEnd(
+                    Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar))
+            is { Length: > 0 } name
+                ? name
+                : fullPath;
     }
 
     private bool CaptureFolderIdentity(ManagedFolder folder)
@@ -278,6 +265,12 @@ public partial class MainWindow : Window
                     : exists ? 1.0 : 0.72;
             }
 
+            var canLocateMovedFolder =
+                !exists &&
+                storageState == VaultStorageState.PlaintextPresent &&
+                folder.VolumeSerialNumber != 0 &&
+                !string.IsNullOrWhiteSpace(folder.FileId);
+
             _rows.Add(new FolderRow(
                 folder.Id,
                 folder.Name,
@@ -288,7 +281,10 @@ public partial class MainWindow : Window
                 statusBrush,
                 cardOpacity,
                 protectionAction,
-                protectionEnabled));
+                protectionEnabled,
+                canLocateMovedFolder
+                    ? Visibility.Visible
+                    : Visibility.Collapsed));
         }
     }
 
@@ -541,6 +537,95 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void FindFolder_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (!TryGetFolder(sender, out var folder))
+            return;
+
+        var storageState = _protection.HasPreparedProfile(folder.Id)
+            ? _protection.GetStorageInfo(folder.Id)?.State
+                ?? VaultStorageState.PlaintextPresent
+            : VaultStorageState.PlaintextPresent;
+
+        if (storageState != VaultStorageState.PlaintextPresent)
+        {
+            MessageBox.Show(this,
+                "Поиск перемещённой plaintext-папки недоступен в Vault-only/LockPending.",
+                "GeniaFolder",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        if (folder.VolumeSerialNumber == 0 ||
+            string.IsNullOrWhiteSpace(folder.FileId))
+        {
+            MessageBox.Show(this,
+                "Для этой старой записи ещё нет сохранённого Windows file ID. " +
+                "Автоматически доказать, что выбранная папка — именно исходная, невозможно.",
+                "GeniaFolder",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        var dialog = new OpenFolderDialog
+        {
+            Title = $"Найдите перемещённую папку «{folder.Name}»",
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog(this) != true)
+            return;
+
+        var selectedPath = Path.GetFullPath(dialog.FolderName);
+
+        if (!_folderIdentity.Matches(
+            selectedPath,
+            folder.VolumeSerialNumber,
+            folder.FileId))
+        {
+            MessageBox.Show(this,
+                "Выбранная папка не является той же самой папкой Windows: file ID не совпадает.\n\n" +
+                "GeniaFolder не будет перепривязывать защищённую запись к похожей папке или копии.",
+                "GeniaFolder — другая папка",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        if (_folders.Any(f =>
+            f.Id != folder.Id &&
+            Directory.Exists(f.Path) &&
+            string.Equals(
+                Path.GetFullPath(f.Path),
+                selectedPath,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            MessageBox.Show(this,
+                "Эта папка уже зарегистрирована в GeniaFolder другой записью.",
+                "GeniaFolder",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        UpdateManagedFolderPath(
+            folder,
+            selectedPath);
+
+        await _registry.SaveAsync(_folders);
+        RebuildRows();
+
+        MessageBox.Show(this,
+            $"Папка найдена и путь обновлён:\n{folder.Path}",
+            "GeniaFolder",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+    }
+
     private async void Remove_Click(object sender, RoutedEventArgs e)
     {
         if (!TryGetFolder(sender, out var folder))
@@ -636,5 +721,6 @@ public partial class MainWindow : Window
         MediaBrush StatusBrush,
         double CardOpacity,
         string ProtectionActionLabel,
-        bool ProtectionEnabled);
+        bool ProtectionEnabled,
+        Visibility FindVisibility);
 }

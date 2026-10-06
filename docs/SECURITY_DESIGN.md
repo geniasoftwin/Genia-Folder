@@ -109,3 +109,12 @@ Storage state is persisted as `PlaintextPresent`, `LockPending` or `VaultOnly`. 
 Unlock uses the existing authenticated restore pipeline. If the process dies after restored plaintext has been published but before the profile state is updated, GeniaFolder can verify the existing plaintext against the vault and complete the state transition without overwriting it.
 
 CI now also rejects stale-vault deletion, verifies Vault-only plaintext removal, verifies byte-identical unlock, exercises marked restore-staging cleanup, and resumes a simulated LockPending hard-kill state.
+
+
+## Installation-wide Master Recovery (alpha.10)
+
+The Standard Protection recovery root is installation-wide rather than per-folder. The first protected folder creates a random 256-bit Master Recovery secret. Only a SHA-256 verifier/fingerprint is persisted; the GF1 paper key is shown once and must be stored off-computer.
+
+Each folder remains cryptographically independent: it receives a random FEK and a separate password-derived KEK. Recovery uses a folder-specific KEK derived with HMAC-SHA256 from the common Master secret, a random per-profile recovery salt, and FolderId. AES-256-GCM wraps the folder FEK with associated data binding ProfileId, FolderId and mode.
+
+Legacy profiles using the earlier per-folder recovery algorithm remain readable by their original per-folder Recovery Keys. Fresh alpha.10 test environments use the installation-wide model.

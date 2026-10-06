@@ -1077,27 +1077,34 @@ internal static class Program
 
     private static string ReadIconResource(string desktopIni)
     {
-        const string prefix = "IconResource=";
+        foreach (var prefix in new[]
+        {
+            "IconResource=",
+            "IconFile="
+        })
+        {
+            var line = desktopIni
+                .Split(
+                    ["\r\n", "\n"],
+                    StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault(value =>
+                    value.StartsWith(
+                        prefix,
+                        StringComparison.OrdinalIgnoreCase));
 
-        var line = desktopIni
-            .Split(
-                ["\r\n", "\n"],
-                StringSplitOptions.RemoveEmptyEntries)
-            .FirstOrDefault(value =>
-                value.StartsWith(
-                    prefix,
-                    StringComparison.OrdinalIgnoreCase));
+            if (line is null)
+                continue;
 
-        if (line is null)
-            return string.Empty;
+            var value = line[prefix.Length..];
+            var comma = value.LastIndexOf(',');
 
-        var value = line[prefix.Length..];
-        var comma = value.LastIndexOf(',');
+            return (comma >= 0
+                    ? value[..comma]
+                    : value)
+                .Trim();
+        }
 
-        return (comma >= 0
-                ? value[..comma]
-                : value)
-            .Trim();
+        return string.Empty;
     }
 
     private static async Task<byte[]> HashFileAsync(string path)

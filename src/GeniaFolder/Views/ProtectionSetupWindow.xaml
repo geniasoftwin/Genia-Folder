@@ -16,6 +16,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <TextBlock Text="Standard Protection"
@@ -42,7 +43,7 @@
                          MinHeight="36"
                          Padding="8,0"
                          VerticalContentAlignment="Center" />
-            <TextBlock Text="Минимум 12 символов. Пароль не сохраняется."
+            <TextBlock Text="Минимум 8 символов; рекомендуется 12+. Пароль не сохраняется."
                        Margin="0,5,0,0"
                        FontSize="12"
                        Foreground="#6C7078" />
@@ -58,8 +59,26 @@
                          VerticalContentAlignment="Center" />
         </StackPanel>
 
+        <StackPanel x:Name="MasterRecoveryPanel"
+                    Grid.Row="4"
+                    Margin="0,16,0,0"
+                    Visibility="Collapsed">
+            <TextBlock Text="Общий бумажный Master Recovery Key"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,6" />
+            <PasswordBox x:Name="MasterRecoveryKeyBox"
+                         MinHeight="36"
+                         Padding="8,0"
+                         VerticalContentAlignment="Center" />
+            <TextBlock x:Name="MasterFingerprintText"
+                       Margin="0,5,0,0"
+                       FontSize="12"
+                       TextWrapping="Wrap"
+                       Foreground="#6C7078" />
+        </StackPanel>
+
         <CheckBox x:Name="AcknowledgeBox"
-                  Grid.Row="4"
+                  Grid.Row="5"
                   Margin="0,18,0,0"
                   VerticalContentAlignment="Top">
             <TextBlock Text="Я понимаю, что на этом этапе создаются ключи защиты, но файлы в папке пока остаются обычными и незашифрованными."
@@ -68,12 +87,12 @@
         </CheckBox>
 
         <TextBlock x:Name="ErrorText"
-                   Grid.Row="5"
+                   Grid.Row="6"
                    Margin="0,10,0,0"
                    Foreground="#B42318"
                    TextWrapping="Wrap" />
 
-        <StackPanel Grid.Row="6"
+        <StackPanel Grid.Row="7"
                     Margin="0,22,0,0"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right">

@@ -77,39 +77,92 @@ internal static class Program
                 appearanceCleanupPath,
                 cleanupMarkerId);
 
-            var oldIcon = Path.Combine(
-                appearanceCleanupPath,
-                ".geniafolder-blue.ico");
-            await File.WriteAllBytesAsync(
-                oldIcon,
-                [0x00, 0x01, 0x02]);
+            var appearance =
+                new FolderAppearanceService();
 
-            File.SetAttributes(
-                oldIcon,
-                FileAttributes.Hidden |
-                FileAttributes.System);
+            await appearance.ApplyColorAsync(
+                appearanceCleanupPath,
+                FolderColor.Blue);
 
             var desktopIni = Path.Combine(
                 appearanceCleanupPath,
                 "desktop.ini");
 
-            await File.WriteAllTextAsync(
+            var firstIni = await File.ReadAllTextAsync(
                 desktopIni,
-                "[.ShellClassInfo]\r\nIconResource=.geniafolder-blue.ico,0\r\n",
                 Encoding.Unicode);
 
-            File.SetAttributes(
-                desktopIni,
-                FileAttributes.Hidden |
-                FileAttributes.System);
-
-            await new FolderAppearanceService()
-                .RemoveCustomizationAsync(
-                    appearanceCleanupPath);
+            var firstResource =
+                ReadIconResource(firstIni);
 
             Assert(
-                !File.Exists(oldIcon) &&
-                !File.Exists(desktopIni),
+                !string.IsNullOrWhiteSpace(firstResource) &&
+                firstResource.Contains(
+                    "blue",
+                    StringComparison.OrdinalIgnoreCase),
+                "blue color must publish a blue-specific icon resource");
+
+            var firstIconPath = Path.Combine(
+                appearanceCleanupPath,
+                firstResource);
+
+            Assert(
+                File.Exists(firstIconPath),
+                "desktop.ini must reference an existing first icon");
+
+            await appearance.ApplyColorAsync(
+                appearanceCleanupPath,
+                FolderColor.Red);
+
+            var secondIni = await File.ReadAllTextAsync(
+                desktopIni,
+                Encoding.Unicode);
+
+            var secondResource =
+                ReadIconResource(secondIni);
+
+            Assert(
+                !string.IsNullOrWhiteSpace(secondResource) &&
+                secondResource.Contains(
+                    "red",
+                    StringComparison.OrdinalIgnoreCase),
+                "red color must publish a red-specific icon resource");
+
+            Assert(
+                !string.Equals(
+                    firstResource,
+                    secondResource,
+                    StringComparison.OrdinalIgnoreCase),
+                "each color application must use a unique icon resource path");
+
+            Assert(
+                File.Exists(firstIconPath),
+                "previous icon must be retained briefly for Explorer cache safety");
+
+            Assert(
+                File.Exists(
+                    Path.Combine(
+                        appearanceCleanupPath,
+                        secondResource)),
+                "desktop.ini must reference an existing second icon");
+
+            var folderAttributes =
+                File.GetAttributes(appearanceCleanupPath);
+
+            Assert(
+                (folderAttributes & FileAttributes.System) != 0 ||
+                (folderAttributes & FileAttributes.ReadOnly) != 0,
+                "colored folder must carry shell customization attributes");
+
+            await appearance.RemoveCustomizationAsync(
+                appearanceCleanupPath);
+
+            Assert(
+                !File.Exists(desktopIni) &&
+                !Directory.EnumerateFiles(
+                    appearanceCleanupPath,
+                    ".geniafolder*.ico",
+                    SearchOption.TopDirectoryOnly).Any(),
                 "removing a managed entry must clear GeniaFolder shell color metadata");
 
             Assert(
@@ -118,7 +171,7 @@ internal static class Program
                     cleanupMarkerId),
                 "removing color customization must preserve the stable folder marker");
 
-            Pass("removing GeniaFolder appearance keeps tracking marker intact");
+            Pass("color changes use unique resources and cleanup keeps tracking marker intact");
 
             var moveSource = Path.Combine(root, "move-source");
             var managedRoot = Path.Combine(root, "managed-root");
@@ -1020,6 +1073,31 @@ internal static class Program
              fileName.EndsWith(
                 ".ico",
                 StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ReadIconResource(string desktopIni)
+    {
+        const string prefix = "IconResource=";
+
+        var line = desktopIni
+            .Split(
+                ["\r\n", "\n"],
+                StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(value =>
+                value.StartsWith(
+                    prefix,
+                    StringComparison.OrdinalIgnoreCase));
+
+        if (line is null)
+            return string.Empty;
+
+        var value = line[prefix.Length..];
+        var comma = value.LastIndexOf(',');
+
+        return (comma >= 0
+                ? value[..comma]
+                : value)
+            .Trim();
     }
 
     private static async Task<byte[]> HashFileAsync(string path)

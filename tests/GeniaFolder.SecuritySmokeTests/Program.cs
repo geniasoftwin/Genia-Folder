@@ -147,6 +147,63 @@ internal static class Program
 
             Pass("folder resolved after move into managed folder and back out");
 
+            var crossOld = Path.Combine(root, "cross-old");
+            var crossCurrent = Path.Combine(root, "cross-current");
+
+            Directory.CreateDirectory(crossOld);
+            await File.WriteAllTextAsync(
+                Path.Combine(crossOld, "payload.txt"),
+                "cross-volume marker tracking",
+                Encoding.UTF8);
+
+            var crossFolder = new ManagedFolder
+            {
+                Id = Guid.NewGuid(),
+                Name = "cross-old",
+                Path = crossOld
+            };
+
+            markerService.EnsureMarker(
+                crossOld,
+                crossFolder.Id);
+
+            CopyDirectory(crossOld, crossCurrent);
+            DeleteTreeBestEffort(crossOld);
+
+            var currentIdentity =
+                identityProbe.TryGetIdentity(crossCurrent)
+                ?? throw new InvalidOperationException(
+                    "Could not capture cross-current identity.");
+
+            crossFolder.KnownPaths.Add(crossOld);
+            crossFolder.Path = crossCurrent;
+            crossFolder.VolumeSerialNumber =
+                currentIdentity.VolumeSerialNumber;
+            crossFolder.FileId =
+                currentIdentity.FileId;
+
+            CopyDirectory(crossCurrent, crossOld);
+            DeleteTreeBestEffort(crossCurrent);
+
+            var historicalResolved = resolver.TryResolve(
+                crossFolder,
+                [crossFolder, knownRoot]);
+
+            Assert(
+                string.Equals(
+                    Path.GetFullPath(crossOld),
+                    historicalResolved,
+                    StringComparison.OrdinalIgnoreCase),
+                "cross-volume return to historical path was not resolved by GeniaFolder marker");
+
+            Assert(
+                markerService.Matches(
+                    crossOld,
+                    crossFolder.Id),
+                "returned cross-volume folder lost its stable GeniaFolder marker");
+
+            Pass("cross-volume return resolved by marker and historical path");
+
             var source = Path.Combine(root, "source");
             var nested = Path.Combine(source, "nested");
             Directory.CreateDirectory(nested);

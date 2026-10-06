@@ -12,11 +12,14 @@ public partial class RecoveryKeyWindow : Window
         InitializeComponent();
 
         DescriptionText.Text =
-            $"Аварийный ключ для «{folderName}». Он сможет восстановить доступ, " +
-            "если пароль папки будет забыт.";
+            $"Это общий бумажный Master Recovery Key для всей установки GeniaFolder. " +
+            $"Он создаётся один раз при защите «{folderName}» и сможет восстановить " +
+            "любую папку, которую вы позже привяжете к этой установке. " +
+            "Храните его вне компьютера.";
 
         RecoveryKeyText.Text = recoveryKey;
-        FingerprintText.Text = $"Fingerprint профиля: {fingerprint}";
+        FingerprintText.Text =
+            $"Fingerprint Master Recovery: {fingerprint}";
 
         SavedBox.Checked += (_, _) => ContinueButton.IsEnabled = true;
         SavedBox.Unchecked += (_, _) => ContinueButton.IsEnabled = false;

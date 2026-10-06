@@ -832,6 +832,9 @@ internal static class Program
                 expectedRoot,
                 "*",
                 SearchOption.AllDirectories)
+            .Where(p => !IsGeneratedRootMetadata(
+                expectedRoot,
+                p))
             .ToDictionary(
                 p => Path.GetRelativePath(expectedRoot, p),
                 p => p,
@@ -842,6 +845,9 @@ internal static class Program
                 actualRoot,
                 "*",
                 SearchOption.AllDirectories)
+            .Where(p => !IsGeneratedRootMetadata(
+                actualRoot,
+                p))
             .ToDictionary(
                 p => Path.GetRelativePath(actualRoot, p),
                 p => p,
@@ -871,6 +877,40 @@ internal static class Program
             CryptographicOperations.ZeroMemory(expectedHash);
             CryptographicOperations.ZeroMemory(actualHash);
         }
+    }
+
+    private static bool IsGeneratedRootMetadata(
+        string root,
+        string path)
+    {
+        var relative = Path.GetRelativePath(root, path);
+        if (relative.Contains(
+            Path.DirectorySeparatorChar))
+        {
+            return false;
+        }
+
+        var fileName = Path.GetFileName(path);
+
+        return
+            string.Equals(
+                fileName,
+                "desktop.ini",
+                StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(
+                fileName,
+                ".geniafolder.id",
+                StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(
+                fileName,
+                ".geniafolder.ico",
+                StringComparison.OrdinalIgnoreCase) ||
+            (fileName.StartsWith(
+                ".geniafolder-",
+                StringComparison.OrdinalIgnoreCase) &&
+             fileName.EndsWith(
+                ".ico",
+                StringComparison.OrdinalIgnoreCase));
     }
 
     private static async Task<byte[]> HashFileAsync(string path)

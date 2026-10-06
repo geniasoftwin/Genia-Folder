@@ -18,6 +18,9 @@ public sealed class ProtectionService
     private static readonly byte[] RecoveryContext =
         Encoding.UTF8.GetBytes("GeniaFolder Recovery KEK v1");
 
+    private static readonly byte[] MasterRecoveryContext =
+        Encoding.UTF8.GetBytes("GeniaFolder Master Recovery KEK v1");
+
     private readonly string _profilesRoot;
     private readonly string _masterRecoveryPath;
     private readonly JsonSerializerOptions _jsonOptions = new()
@@ -322,9 +325,10 @@ public sealed class ProtectionService
                 HashAlgorithmName.SHA256,
                 FekSize);
 
-            recoveryKek = DeriveRecoveryKek(
+            recoveryKek = DeriveMasterRecoveryKek(
                 recoverySecret,
-                recoverySalt);
+                recoverySalt,
+                folder.Id);
 
             var aad = BuildAssociatedData(
                 profileId,
@@ -734,7 +738,22 @@ public sealed class ProtectionService
 
         try
         {
-            kek = DeriveRecoveryKek(recoverySecret, salt);
+            kek = profile.RecoveryKdf.Algorithm switch
+            {
+                "HMAC-SHA256-master-v1" =>
+                    DeriveMasterRecoveryKek(
+                        recoverySecret,
+                        salt,
+                        profile.FolderId),
+
+                "HMAC-SHA256-v1" =>
+                    DeriveRecoveryKek(
+                        recoverySecret,
+                        salt),
+
+                _ => throw new CryptographicException(
+                    "Неподдерживаемый алгоритм Recovery Key.")
+            };
 
             return UnwrapKey(
                 profile.RecoveryWrappedFek,
@@ -803,6 +822,50 @@ public sealed class ProtectionService
             CryptographicOperations.ZeroMemory(nonce);
             CryptographicOperations.ZeroMemory(ciphertext);
             CryptographicOperations.ZeroMemory(tag);
+        }
+    }
+
+    private static byte[] DeriveMasterRecoveryKek(
+        byte[] recoverySecret,
+        byte[] salt,
+        Guid folderId)
+    {
+        var folderBytes = folderId.ToByteArray();
+        var message = new byte[
+            MasterRecoveryContext.Length +
+            salt.Length +
+            folderBytes.Length];
+
+        try
+        {
+            Buffer.BlockCopy(
+                MasterRecoveryContext,
+                0,
+                message,
+                0,
+                MasterRecoveryContext.Length);
+
+            Buffer.BlockCopy(
+                salt,
+                0,
+                message,
+                MasterRecoveryContext.Length,
+                salt.Length);
+
+            Buffer.BlockCopy(
+                folderBytes,
+                0,
+                message,
+                MasterRecoveryContext.Length + salt.Length,
+                folderBytes.Length);
+
+            using var hmac = new HMACSHA256(recoverySecret);
+            return hmac.ComputeHash(message);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(folderBytes);
+            CryptographicOperations.ZeroMemory(message);
         }
     }
 

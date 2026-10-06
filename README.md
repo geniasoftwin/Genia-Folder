@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.8
+## Current version: 0.2.0-alpha.9
 
 Implemented:
 
@@ -172,3 +172,14 @@ Folder identity tracking now handles more than same-parent renames:
 - manual location is accepted only when the selected directory has the exact same Windows identity;
 - look-alike folders, copies and cross-volume moves are not silently rebound;
 - Vault-only and LockPending still disable plaintext relocation recovery because a missing plaintext path is expected in those states.
+
+
+## 0.2.0-alpha.9 relocation and protected removal
+
+Cross-volume moves can change the Windows filesystem identity even when the user considers the folder to be the same data. GeniaFolder no longer trusts a reappeared path when its stored volume/file ID changed.
+
+For a protected folder with a verified vault, `Найти…` can validate a relocation candidate by unlocking the profile with the folder password or Master Recovery Key and comparing the complete directory/file set and SHA-256 of every plaintext file against the authenticated vault manifest. Only a complete match updates the managed path and captures the new Windows identity.
+
+Removing a protected entry from the GeniaFolder list now requires the folder password. Vault-only and LockPending entries cannot be removed from the list until the storage transaction is returned to plaintext-present state. Removing an entry does not delete the folder, protection profile or encrypted vault.
+
+For repeatable manual testing, `RESET_TEST_ENV.cmd` safely moves the current test root and local GeniaFolder app state into timestamped backup folders, then creates a fresh `D:\GeniaFolder test\Папка 1`, `Папка 2` and `Папка 3`.

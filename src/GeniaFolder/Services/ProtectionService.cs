@@ -57,6 +57,81 @@ public sealed class ProtectionService
         return metadata?.Fingerprint ?? string.Empty;
     }
 
+    public PreparedMasterRecoveryKey PrepareMasterRecoveryKey()
+    {
+        if (HasMasterRecoveryKey)
+        {
+            throw new InvalidOperationException(
+                "Master Recovery Key этой установки уже создан.");
+        }
+
+        var recoverySecret = RandomNumberGenerator.GetBytes(32);
+        var hash = SHA256.HashData(recoverySecret);
+
+        try
+        {
+            return new PreparedMasterRecoveryKey(
+                RecoveryKeyCodec.Encode(recoverySecret),
+                FormatMasterFingerprint(hash),
+                Convert.ToBase64String(hash));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(recoverySecret);
+            CryptographicOperations.ZeroMemory(hash);
+        }
+    }
+
+    public async Task SaveMasterRecoveryKeyAsync(
+        PreparedMasterRecoveryKey prepared)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+
+        if (HasMasterRecoveryKey)
+        {
+            throw new InvalidOperationException(
+                "Master Recovery Key этой установки уже создан.");
+        }
+
+        await SaveMasterRecoveryMetadataAtomicAsync(
+            new MasterRecoveryMetadata
+            {
+                FormatVersion = 1,
+                MasterKeyHashBase64 = prepared.MasterRecoveryHashBase64,
+                Fingerprint = prepared.Fingerprint,
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+    }
+
+    public bool VerifyMasterRecoveryKey(string recoveryKey)
+    {
+        var metadata = LoadMasterRecoveryMetadata();
+        if (metadata is null ||
+            !RecoveryKeyCodec.TryDecode(
+                recoveryKey,
+                out var recoverySecret))
+        {
+            return false;
+        }
+
+        var hash = SHA256.HashData(recoverySecret);
+        var expected = Convert.FromBase64String(
+            metadata.MasterKeyHashBase64);
+
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(
+                hash,
+                expected);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(recoverySecret);
+            CryptographicOperations.ZeroMemory(hash);
+            CryptographicOperations.ZeroMemory(expected);
+        }
+    }
+
     public bool HasPreparedProfile(Guid folderId) =>
         File.Exists(GetProfilePath(folderId));
 
@@ -238,72 +313,55 @@ public sealed class ProtectionService
             throw new InvalidOperationException(
                 "Для этой папки профиль защиты уже создан.");
 
-        var existingMaster = LoadMasterRecoveryMetadata();
-        var isNewMaster = existingMaster is null;
+        var existingMaster = LoadMasterRecoveryMetadata()
+            ?? throw new InvalidOperationException(
+                "Сначала создайте общий Master Recovery Key GeniaFolder.");
 
-        byte[] recoverySecret;
-        string recoveryKeyToDisplay;
+        if (string.IsNullOrWhiteSpace(masterRecoveryKey) ||
+            !RecoveryKeyCodec.TryDecode(
+                masterRecoveryKey,
+                out var recoverySecret))
+        {
+            throw new InvalidOperationException(
+                "Введите общий Master Recovery Key этой установки GeniaFolder.");
+        }
+
+        var masterHash = SHA256.HashData(recoverySecret);
         string masterHashBase64;
         string masterFingerprint;
 
-        if (isNewMaster)
+        try
         {
-            recoverySecret = RandomNumberGenerator.GetBytes(32);
-            recoveryKeyToDisplay = RecoveryKeyCodec.Encode(recoverySecret);
+            var expectedHash = Convert.FromBase64String(
+                existingMaster.MasterKeyHashBase64);
 
-            var hash = SHA256.HashData(recoverySecret);
             try
             {
-                masterHashBase64 = Convert.ToBase64String(hash);
-                masterFingerprint = FormatMasterFingerprint(hash);
+                if (!CryptographicOperations.FixedTimeEquals(
+                    masterHash,
+                    expectedHash))
+                {
+                    throw new InvalidOperationException(
+                        "Master Recovery Key не соответствует этой установке GeniaFolder.");
+                }
             }
             finally
             {
-                CryptographicOperations.ZeroMemory(hash);
+                CryptographicOperations.ZeroMemory(expectedHash);
             }
+
+            masterHashBase64 =
+                existingMaster.MasterKeyHashBase64;
+            masterFingerprint =
+                existingMaster.Fingerprint;
         }
-        else
+        finally
         {
-            if (string.IsNullOrWhiteSpace(masterRecoveryKey) ||
-                !RecoveryKeyCodec.TryDecode(
-                    masterRecoveryKey,
-                    out recoverySecret))
-            {
-                throw new InvalidOperationException(
-                    "Введите общий Master Recovery Key этой установки GeniaFolder.");
-            }
-
-            var hash = SHA256.HashData(recoverySecret);
-            try
-            {
-                var expectedHash = Convert.FromBase64String(
-                    existingMaster!.MasterKeyHashBase64);
-
-                try
-                {
-                    if (!CryptographicOperations.FixedTimeEquals(
-                        hash,
-                        expectedHash))
-                    {
-                        throw new InvalidOperationException(
-                            "Master Recovery Key не соответствует этой установке GeniaFolder.");
-                    }
-                }
-                finally
-                {
-                    CryptographicOperations.ZeroMemory(expectedHash);
-                }
-
-                masterHashBase64 = existingMaster.MasterKeyHashBase64;
-                masterFingerprint = existingMaster.Fingerprint;
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(hash);
-            }
-
-            recoveryKeyToDisplay = string.Empty;
+            CryptographicOperations.ZeroMemory(masterHash);
         }
+
+        var recoveryKeyToDisplay = string.Empty;
+        const bool isNewMaster = false;
 
         var profileId = Guid.NewGuid();
         var createdAt = DateTimeOffset.UtcNow;
@@ -363,9 +421,8 @@ public sealed class ProtectionService
                     aad)
             };
 
-            var recoveryKeyForVerification = isNewMaster
-                ? recoveryKeyToDisplay
-                : masterRecoveryKey!;
+            var recoveryKeyForVerification =
+                masterRecoveryKey!;
 
             var profileFingerprint =
                 GetProfileFingerprint(profile);
@@ -1097,6 +1154,11 @@ internal sealed class MasterRecoveryMetadata
     public string Fingerprint { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
 }
+
+public sealed record PreparedMasterRecoveryKey(
+    string RecoveryKey,
+    string Fingerprint,
+    string MasterRecoveryHashBase64);
 
 public sealed record PreparedProtectionProfile(
     ProtectionProfile Profile,

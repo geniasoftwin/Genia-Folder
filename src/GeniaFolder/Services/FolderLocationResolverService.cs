@@ -54,6 +54,7 @@ public sealed class FolderLocationResolverService
             }
 
             AddRoot(known.Path);
+            AddAncestorRoots(known.Path);
         }
 
         string? match = null;

@@ -118,3 +118,14 @@ The Standard Protection recovery root is installation-wide rather than per-folde
 Each folder remains cryptographically independent: it receives a random FEK and a separate password-derived KEK. Recovery uses a folder-specific KEK derived with HMAC-SHA256 from the common Master secret, a random per-profile recovery salt, and FolderId. AES-256-GCM wraps the folder FEK with associated data binding ProfileId, FolderId and mode.
 
 Legacy profiles using the earlier per-folder recovery algorithm remain readable by their original per-folder Recovery Keys. Fresh alpha.10 test environments use the installation-wide model.
+
+
+## Stable managed-folder marker (alpha.13)
+
+Plaintext managed directories contain a non-secret hidden/system `.geniafolder.id` marker with `GeniaFolder.Folder.v1|<folderId>`. It is excluded from encrypted vault contents and is recreated after authenticated vault restore. The marker is a location/identity hint, not an authentication secret. For protected entries, a marker match with a changed Windows filesystem identity still requires password/Master Recovery authentication and vault content verification when a verified vault exists.
+
+The registry also keeps a bounded history of confirmed folder paths. Resolution uses exact historical paths, the parents/ancestors of known paths, and parents of other managed folders without recursively scanning entire drives. Multiple marker matches are treated as ambiguous rather than guessed.
+
+## First-run Master Recovery setup (alpha.13)
+
+Master Recovery Key creation is independent of folder protection. A fresh application state generates the installation-wide 256-bit recovery secret before the main folder UI is shown and displays the GF1 paper key once for offline recording. Only verifier/fingerprint metadata is persisted. Individual folder protection never generates a new paper recovery key.

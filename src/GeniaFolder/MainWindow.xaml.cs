@@ -99,7 +99,8 @@ public partial class MainWindow : Window
                 }
 
                 // A path can reappear after a cross-volume move/copy with a
-                // different Windows file ID. Never silently trust the path.
+                // different Windows file ID. Same-volume moves preserve the
+                // identity; cross-volume copy/delete semantics do not.
                 if (_folderIdentity.Matches(
                     folder.Path,
                     folder.VolumeSerialNumber,
@@ -108,8 +109,20 @@ public partial class MainWindow : Window
                     continue;
                 }
 
-                // Keep the stored identity unchanged. The UI will require an
-                // explicit identity/content verification before rebinding.
+                // For an unprotected entry, returning to the exact registered
+                // path is enough to adopt the new filesystem identity. There
+                // is no cryptographic object bound to this entry.
+                if (storageState == VaultStorageState.PlaintextPresent &&
+                    !_protection.HasPreparedProfile(folder.Id))
+                {
+                    changed |= CaptureFolderIdentity(folder);
+                    continue;
+                }
+
+                // Protected entries fail closed: the path is visible as a
+                // relocation candidate, but the user must authenticate (and,
+                // when a verified vault exists, pass a full content check)
+                // before the new Windows identity is persisted.
                 continue;
             }
 
@@ -258,13 +271,15 @@ public partial class MainWindow : Window
             {
                 if (identityMismatch)
                 {
-                    status = vaultVerified && vaultAvailable
-                        ? "Путь существует, но Windows identity изменился · требуется проверка по encrypted vault"
-                        : "Путь существует, но Windows identity изменился · требуется перепривязка";
+                    status = protectionPrepared
+                        ? vaultVerified && vaultAvailable
+                            ? "Папка вернулась по сохранённому пути с новым Windows identity · подтвердите по encrypted vault"
+                            : "Папка вернулась по сохранённому пути с новым Windows identity · требуется пароль"
+                        : "Папка вернулась по сохранённому пути · обновляем Windows identity";
 
-                    statusBrush = vaultVerified && vaultAvailable
+                    statusBrush = protectionPrepared
                         ? Brushes.DarkGoldenrod
-                        : Brushes.Firebrick;
+                        : Brushes.DarkGreen;
 
                     protectionAction = vaultVerified
                         ? "Vault"
@@ -272,7 +287,9 @@ public partial class MainWindow : Window
                             ? "Защита"
                             : "Защита";
 
-                    protectionEnabled = vaultVerified && vaultAvailable;
+                    protectionEnabled = vaultVerified
+                        ? vaultAvailable
+                        : exists;
                     cardOpacity = 1.0;
                 }
                 else
@@ -333,6 +350,9 @@ public partial class MainWindow : Window
                 cardOpacity,
                 protectionAction,
                 protectionEnabled,
+                identityMismatch
+                    ? "Проверить…"
+                    : "Найти…",
                 canLocateMovedFolder
                     ? Visibility.Visible
                     : Visibility.Collapsed));
@@ -610,7 +630,10 @@ public partial class MainWindow : Window
         if (!TryGetFolder(sender, out var folder))
             return;
 
-        var storageState = _protection.HasPreparedProfile(folder.Id)
+        var protectionPrepared =
+            _protection.HasPreparedProfile(folder.Id);
+
+        var storageState = protectionPrepared
             ? _protection.GetStorageInfo(folder.Id)?.State
                 ?? VaultStorageState.PlaintextPresent
             : VaultStorageState.PlaintextPresent;
@@ -625,16 +648,37 @@ public partial class MainWindow : Window
             return;
         }
 
-        var dialog = new OpenFolderDialog
+        var currentPathExists = Directory.Exists(folder.Path);
+        var currentPathIdentityMatches =
+            currentPathExists &&
+            folder.VolumeSerialNumber != 0 &&
+            !string.IsNullOrWhiteSpace(folder.FileId) &&
+            _folderIdentity.Matches(
+                folder.Path,
+                folder.VolumeSerialNumber,
+                folder.FileId);
+
+        string selectedPath;
+
+        if (currentPathExists && !currentPathIdentityMatches)
         {
-            Title = $"Найдите перемещённую папку «{folder.Name}»",
-            Multiselect = false
-        };
+            // Typical cross-volume round trip: the directory is back at the
+            // registered path, but Windows assigned a new volume/file ID.
+            selectedPath = Path.GetFullPath(folder.Path);
+        }
+        else
+        {
+            var dialog = new OpenFolderDialog
+            {
+                Title = $"Найдите перемещённую папку «{folder.Name}»",
+                Multiselect = false
+            };
 
-        if (dialog.ShowDialog(this) != true)
-            return;
+            if (dialog.ShowDialog(this) != true)
+                return;
 
-        var selectedPath = Path.GetFullPath(dialog.FolderName);
+            selectedPath = Path.GetFullPath(dialog.FolderName);
+        }
 
         if (_folders.Any(f =>
             f.Id != folder.Id &&
@@ -660,75 +704,101 @@ public partial class MainWindow : Window
                 folder.VolumeSerialNumber,
                 folder.FileId);
 
-        if (!sameWindowsIdentity)
+        var verifiedByVault = false;
+        var authenticatedWithoutVault = false;
+
+        if (!sameWindowsIdentity && protectionPrepared)
         {
-            var vaultInfo = _protection.HasPreparedProfile(folder.Id)
-                ? _protection.GetVaultInfo(folder.Id)
-                : null;
+            var vaultInfo = _protection.GetVaultInfo(folder.Id);
 
             var vaultAvailable =
                 vaultInfo?.State == VaultCopyState.VerifiedCopy &&
                 !string.IsNullOrWhiteSpace(vaultInfo.Path) &&
                 Directory.Exists(vaultInfo.Path);
 
-            if (!vaultAvailable)
+            if (vaultAvailable)
             {
-                MessageBox.Show(this,
-                    "Windows file ID выбранной папки не совпадает, а проверенного encrypted vault нет. " +
-                    "GeniaFolder не может безопасно доказать, что это та же папка.",
-                    "GeniaFolder — требуется проверка",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-                return;
+                var selectedName =
+                    Path.GetFileName(
+                        selectedPath.TrimEnd(
+                            Path.DirectorySeparatorChar,
+                            Path.AltDirectorySeparatorChar));
+
+                var candidate = new ManagedFolder
+                {
+                    Id = folder.Id,
+                    Name = string.IsNullOrWhiteSpace(selectedName)
+                        ? folder.Name
+                        : selectedName,
+                    Path = selectedPath,
+                    Color = folder.Color,
+                    Protection = folder.Protection,
+                    AddedAt = folder.AddedAt
+                };
+
+                var verify = new VaultRestoreWindow(
+                    candidate,
+                    vaultInfo!.Path,
+                    selectedPath,
+                    _protection,
+                    _vaultEncryption,
+                    verifyExistingPlaintextOnly: true,
+                    relocationVerification: true)
+                {
+                    Owner = this
+                };
+
+                if (verify.ShowDialog() != true)
+                    return;
+
+                verifiedByVault = true;
             }
-
-            var selectedName =
-                Path.GetFileName(
-                    selectedPath.TrimEnd(
-                        Path.DirectorySeparatorChar,
-                        Path.AltDirectorySeparatorChar));
-
-            var candidate = new ManagedFolder
+            else
             {
-                Id = folder.Id,
-                Name = string.IsNullOrWhiteSpace(selectedName)
-                    ? folder.Name
-                    : selectedName,
-                Path = selectedPath,
-                Color = folder.Color,
-                Protection = folder.Protection,
-                AddedAt = folder.AddedAt
-            };
+                var confirm = new ProtectedActionPasswordWindow(
+                    folder.Id,
+                    folder.Name,
+                    "Windows identity изменился после перемещения между дисками. " +
+                    "Проверенный encrypted vault ещё не создан, поэтому для явной перепривязки требуется пароль этой папки.",
+                    _protection)
+                {
+                    Owner = this
+                };
 
-            var verify = new VaultRestoreWindow(
-                candidate,
-                vaultInfo!.Path,
-                selectedPath,
-                _protection,
-                _vaultEncryption,
-                verifyExistingPlaintextOnly: true,
-                relocationVerification: true)
-            {
-                Owner = this
-            };
+                if (confirm.ShowDialog() != true)
+                    return;
 
-            if (verify.ShowDialog() != true)
-                return;
+                authenticatedWithoutVault = true;
+            }
         }
 
         UpdateManagedFolderPath(
             folder,
             selectedPath);
 
-        CaptureFolderIdentity(folder);
+        if (!CaptureFolderIdentity(folder))
+        {
+            MessageBox.Show(this,
+                "Не удалось прочитать новый Windows identity выбранной папки. Путь не был сохранён.",
+                "GeniaFolder",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
 
         await _registry.SaveAsync(_folders);
         RebuildRows();
 
+        var resultMessage = sameWindowsIdentity
+            ? $"Папка найдена и путь обновлён:\n{folder.Path}"
+            : verifiedByVault
+                ? $"Папка подтверждена по encrypted vault. Новый Windows identity сохранён:\n{folder.Path}"
+                : authenticatedWithoutVault
+                    ? $"Пароль подтверждён. Новый Windows identity папки сохранён:\n{folder.Path}"
+                    : $"Папка вернулась по сохранённому пути. Новый Windows identity сохранён:\n{folder.Path}";
+
         MessageBox.Show(this,
-            sameWindowsIdentity
-                ? $"Папка найдена и путь обновлён:\n{folder.Path}"
-                : $"Содержимое полностью совпало с encrypted vault. Новый путь и Windows identity сохранены:\n{folder.Path}",
+            resultMessage,
             "GeniaFolder",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
@@ -880,5 +950,6 @@ public partial class MainWindow : Window
         double CardOpacity,
         string ProtectionActionLabel,
         bool ProtectionEnabled,
+        string FindActionLabel,
         Visibility FindVisibility);
 }

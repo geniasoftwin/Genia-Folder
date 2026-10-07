@@ -19,8 +19,6 @@ public sealed class FolderAppearanceService
     private const uint SHCNF_PATHW = 0x0005;
     private const uint SHCNF_FLUSH = 0x1000;
 
-    private const uint FCSM_ICONFILE = 0x00000010;
-    private const uint FCS_FORCEWRITE = 0x00000002;
 
     private const string LegacyIconFileName = ".geniafolder.ico";
     private const string DesktopIniFileName = "desktop.ini";
@@ -54,18 +52,21 @@ public sealed class FolderAppearanceService
                 iconPath,
                 FileAttributes.Hidden | FileAttributes.System);
 
-            // Follow the documented Shell path: mark the folder for
-            // customization first, then let Shell32 force-write IconFile /
-            // IconIndex into desktop.ini. The icon file name is relative so
-            // the customization survives cross-volume folder moves.
+            // Follow Microsoft's documented Desktop.ini format for
+            // ordinary filesystem folders. Use a relative unique icon path so
+            // the customization survives folder moves and cannot collide with
+            // Explorer's cached resource key.
             EnsureCustomizationAttributes(folderPath);
 
-            ApplyNativeFolderIcon(
-                folderPath,
-                iconFileName);
+            var ini =
+                "[.ShellClassInfo]\r\n" +
+                "ConfirmFileOp=0\r\n" +
+                $"IconFile={iconFileName}\r\n" +
+                "IconIndex=0\r\n";
 
-            EnsureDesktopIniAttributes(
-                desktopIniPath);
+            await WriteDesktopIniAtomicAsync(
+                desktopIniPath,
+                ini);
 
             CleanupLegacyFlatIcon(folderPath);
             CleanupLegacyMetadataDirectory(folderPath);
@@ -155,7 +156,6 @@ public sealed class FolderAppearanceService
             File.SetAttributes(
                 folderPath,
                 attributes &
-                ~FileAttributes.System &
                 ~FileAttributes.ReadOnly);
         }
         catch
@@ -191,14 +191,17 @@ public sealed class FolderAppearanceService
         // PathMakeSystemFolder is the shell-native operation. Explicitly
         // preserve both customization bits as well because Explorer behavior
         // varies between Windows builds and views.
-        PathMakeSystemFolder(folderPath);
+        if (!PathMakeSystemFolder(folderPath))
+        {
+            throw new IOException(
+                "Windows не смог включить Desktop.ini customization для папки.");
+        }
 
         var attributes = File.GetAttributes(folderPath);
 
         File.SetAttributes(
             folderPath,
             attributes |
-            FileAttributes.System |
             FileAttributes.ReadOnly);
     }
 
@@ -300,57 +303,60 @@ public sealed class FolderAppearanceService
         }
     }
 
-    private static void ApplyNativeFolderIcon(
-        string folderPath,
-        string iconFileName)
+    private static async Task WriteDesktopIniAtomicAsync(
+        string desktopIniPath,
+        string content)
     {
-        var iconPtr = Marshal.StringToHGlobalUni(
-            iconFileName);
+        var tempPath =
+            desktopIniPath +
+            ".tmp-" +
+            Guid.NewGuid().ToString("N");
 
         try
         {
-            var settings = new SHFOLDERCUSTOMSETTINGS
-            {
-                dwSize = (uint)Marshal.SizeOf<SHFOLDERCUSTOMSETTINGS>(),
-                dwMask = FCSM_ICONFILE,
-                pszIconFile = iconPtr,
-                cchIconFile = 0,
-                iIconIndex = 0
-            };
+            await File.WriteAllTextAsync(
+                tempPath,
+                content,
+                Encoding.Unicode);
 
-            var hr = SHGetSetFolderCustomSettings(
-                ref settings,
-                folderPath,
-                FCS_FORCEWRITE);
+            File.SetAttributes(
+                tempPath,
+                FileAttributes.Hidden |
+                FileAttributes.System);
 
-            if (hr < 0)
-            {
-                Marshal.ThrowExceptionForHR(hr);
-            }
+            if (File.Exists(desktopIniPath))
+                PrepareForOverwrite(desktopIniPath);
+
+            File.Move(
+                tempPath,
+                desktopIniPath,
+                overwrite: true);
+
+            var attributes =
+                File.GetAttributes(desktopIniPath);
+
+            File.SetAttributes(
+                desktopIniPath,
+                attributes |
+                FileAttributes.Hidden |
+                FileAttributes.System);
         }
         finally
         {
-            Marshal.FreeHGlobal(iconPtr);
+            if (File.Exists(tempPath))
+            {
+                try
+                {
+                    File.SetAttributes(
+                        tempPath,
+                        FileAttributes.Normal);
+                    File.Delete(tempPath);
+                }
+                catch
+                {
+                }
+            }
         }
-    }
-
-    private static void EnsureDesktopIniAttributes(
-        string desktopIniPath)
-    {
-        if (!File.Exists(desktopIniPath))
-        {
-            throw new IOException(
-                "Windows Shell не создал desktop.ini для папки.");
-        }
-
-        var attributes = File.GetAttributes(
-            desktopIniPath);
-
-        File.SetAttributes(
-            desktopIniPath,
-            attributes |
-            FileAttributes.Hidden |
-            FileAttributes.System);
     }
 
     private static void CleanupLegacyFlatIcon(string folderPath)
@@ -450,35 +456,6 @@ public sealed class FolderAppearanceService
 
         await output.FlushAsync();
     }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct SHFOLDERCUSTOMSETTINGS
-    {
-        public uint dwSize;
-        public uint dwMask;
-        public IntPtr pvid;
-        public IntPtr pszWebViewTemplate;
-        public uint cchWebViewTemplate;
-        public IntPtr pszWebViewTemplateVersion;
-        public IntPtr pszInfoTip;
-        public uint cchInfoTip;
-        public IntPtr pclsid;
-        public uint dwFlags;
-        public IntPtr pszIconFile;
-        public uint cchIconFile;
-        public int iIconIndex;
-        public IntPtr pszLogo;
-        public uint cchLogo;
-    }
-
-    [DllImport(
-        "shell32.dll",
-        CharSet = CharSet.Unicode,
-        ExactSpelling = true)]
-    private static extern int SHGetSetFolderCustomSettings(
-        ref SHFOLDERCUSTOMSETTINGS pfcs,
-        string pszPath,
-        uint dwReadWrite);
 
     [DllImport("shlwapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

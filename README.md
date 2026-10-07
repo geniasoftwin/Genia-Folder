@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.15
+## Current version: 0.2.0-alpha.16
 
 Implemented:
 
@@ -239,3 +239,8 @@ The Windows smoke suite now applies two different colors sequentially and verifi
 ## 0.2.0-alpha.15 canonical Explorer folder icons
 
 Explorer color customization now follows Microsoft's documented Desktop.ini format for filesystem folders: `IconFile=<relative .ico>` plus `IconIndex=0`. GeniaFolder still publishes a unique icon resource for every color change, writes the Unicode `desktop.ini` atomically, marks it hidden/system, enables folder customization with `PathMakeSystemFolder`, retains a short history of prior icon files for cache safety, and invalidates Explorer's shell icon cache after the update.
+
+
+## 0.2.0-alpha.16 active Explorer view refresh
+
+Changing a folder color now refreshes not only Shell metadata and icon caches but also any open File Explorer window currently showing the folder or its parent directory. GeniaFolder performs best-effort Shell COM refreshes immediately and again after short delays, while also sending change notifications for the new icon file, `desktop.ini`, the folder itself and its parent. This replaces the manual repeated-F5 workaround observed on some Windows Explorer sessions.

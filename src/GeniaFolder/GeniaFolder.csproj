@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>GeniaFolder</AssemblyName>
     <RootNamespace>GeniaFolder</RootNamespace>
-    <Version>0.2.0-alpha.14</Version>
+    <Version>0.2.0-alpha.15</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\GeniaFolder.ico</ApplicationIcon>
   </PropertyGroup>

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
@@ -78,7 +79,13 @@ public sealed class FolderAppearanceService
                 folderPath,
                 iconFileName);
 
-            RefreshExplorer(folderPath);
+            RefreshExplorer(
+                folderPath,
+                desktopIniPath,
+                iconPath);
+
+            await RefreshOpenExplorerViewsAsync(
+                folderPath);
         }
         finally
         {
@@ -164,6 +171,7 @@ public sealed class FolderAppearanceService
         }
 
         RefreshExplorer(folderPath);
+        await RefreshOpenExplorerViewsAsync(folderPath);
         }
         finally
         {
@@ -205,31 +213,236 @@ public sealed class FolderAppearanceService
             FileAttributes.ReadOnly);
     }
 
-    private static void RefreshExplorer(string folderPath)
+    private static void RefreshExplorer(
+        string folderPath,
+        string? desktopIniPath = null,
+        string? iconPath = null)
     {
         var flags = SHCNF_PATHW | SHCNF_FLUSH;
 
-        // The item itself changed (desktop.ini/icon resource).
-        SHChangeNotify(SHCNE_ATTRIBUTES, flags, folderPath, IntPtr.Zero);
-        SHChangeNotify(SHCNE_UPDATEITEM, flags, folderPath, IntPtr.Zero);
+        if (!string.IsNullOrWhiteSpace(iconPath) &&
+            File.Exists(iconPath))
+        {
+            SHChangeNotify(
+                SHCNE_UPDATEITEM,
+                flags,
+                iconPath,
+                IntPtr.Zero);
+        }
 
-        // Explorer often renders a child folder from the parent view, so make
-        // that view refresh immediately as well.
-        var parent = Path.GetDirectoryName(folderPath.TrimEnd(
-            Path.DirectorySeparatorChar,
-            Path.AltDirectorySeparatorChar));
+        if (!string.IsNullOrWhiteSpace(desktopIniPath) &&
+            File.Exists(desktopIniPath))
+        {
+            SHChangeNotify(
+                SHCNE_UPDATEITEM,
+                flags,
+                desktopIniPath,
+                IntPtr.Zero);
+        }
 
-        if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
-            SHChangeNotify(SHCNE_UPDATEDIR, flags, parent, IntPtr.Zero);
+        SHChangeNotify(
+            SHCNE_ATTRIBUTES,
+            flags,
+            folderPath,
+            IntPtr.Zero);
 
-        // Folder icons are cached in Explorer's system image lists. A global
-        // association-change notification invalidates icon/thumbnail cache;
-        // this is intentionally used only after an explicit user color change.
+        SHChangeNotify(
+            SHCNE_UPDATEITEM,
+            flags,
+            folderPath,
+            IntPtr.Zero);
+
+        var parent = Path.GetDirectoryName(
+            folderPath.TrimEnd(
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar));
+
+        if (!string.IsNullOrWhiteSpace(parent) &&
+            Directory.Exists(parent))
+        {
+            SHChangeNotify(
+                SHCNE_UPDATEDIR,
+                flags,
+                parent,
+                IntPtr.Zero);
+        }
+
         SHChangeNotify(
             SHCNE_ASSOCCHANGED,
             SHCNF_IDLIST | SHCNF_FLUSH,
             IntPtr.Zero,
             IntPtr.Zero);
+    }
+
+    private static async Task RefreshOpenExplorerViewsAsync(
+        string folderPath)
+    {
+        if (Process.GetProcessesByName("explorer").Length == 0)
+            return;
+
+        var parent = Path.GetDirectoryName(
+            folderPath.TrimEnd(
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar));
+
+        if (string.IsNullOrWhiteSpace(parent))
+            return;
+
+        // Explorer applies Desktop.ini/icon cache changes asynchronously.
+        // Refresh the relevant open view several times instead of making the
+        // user hold F5 until the shell eventually catches up.
+        foreach (var delay in new[] { 0, 300, 1100 })
+        {
+            if (delay > 0)
+                await Task.Delay(delay);
+
+            RefreshMatchingExplorerWindows(
+                parent,
+                folderPath);
+
+            RefreshExplorer(folderPath);
+        }
+    }
+
+    private static void RefreshMatchingExplorerWindows(
+        string parentPath,
+        string folderPath)
+    {
+        Type? shellType = null;
+        object? shellObject = null;
+        object? windowsObject = null;
+
+        try
+        {
+            shellType = Type.GetTypeFromProgID(
+                "Shell.Application");
+
+            if (shellType is null)
+                return;
+
+            shellObject = Activator.CreateInstance(
+                shellType);
+
+            if (shellObject is null)
+                return;
+
+            dynamic shell = shellObject;
+            windowsObject = shell.Windows();
+
+            if (windowsObject is null)
+                return;
+
+            dynamic windows = windowsObject;
+            var count = (int)windows.Count;
+
+            for (var index = 0; index < count; index++)
+            {
+                object? windowObject = null;
+                object? documentObject = null;
+                object? folderObject = null;
+                object? selfObject = null;
+
+                try
+                {
+                    windowObject = windows.Item(index);
+                    if (windowObject is null)
+                        continue;
+
+                    dynamic window = windowObject;
+                    documentObject = window.Document;
+                    if (documentObject is null)
+                        continue;
+
+                    dynamic document = documentObject;
+                    folderObject = document.Folder;
+                    if (folderObject is null)
+                        continue;
+
+                    dynamic folder = folderObject;
+                    selfObject = folder.Self;
+                    if (selfObject is null)
+                        continue;
+
+                    dynamic self = selfObject;
+                    string? currentPath = self.Path as string;
+
+                    if (string.IsNullOrWhiteSpace(currentPath))
+                        continue;
+
+                    if (PathsEqual(
+                            currentPath,
+                            parentPath) ||
+                        PathsEqual(
+                            currentPath,
+                            folderPath))
+                    {
+                        window.Refresh();
+                    }
+                }
+                catch
+                {
+                    // One Explorer window may be navigating/closing. Skip it.
+                }
+                finally
+                {
+                    ReleaseComObject(selfObject);
+                    ReleaseComObject(folderObject);
+                    ReleaseComObject(documentObject);
+                    ReleaseComObject(windowObject);
+                }
+            }
+        }
+        catch
+        {
+            // Shell refresh is best-effort. The file metadata is already
+            // committed and SHChangeNotify remains the primary mechanism.
+        }
+        finally
+        {
+            ReleaseComObject(windowsObject);
+            ReleaseComObject(shellObject);
+        }
+    }
+
+    private static bool PathsEqual(
+        string left,
+        string right)
+    {
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(left)
+                    .TrimEnd(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(right)
+                    .TrimEnd(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void ReleaseComObject(
+        object? value)
+    {
+        if (value is null ||
+            !Marshal.IsComObject(value))
+        {
+            return;
+        }
+
+        try
+        {
+            Marshal.FinalReleaseComObject(value);
+        }
+        catch
+        {
+        }
     }
 
     private static void PrepareForOverwrite(string path)

@@ -103,7 +103,18 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    if (_folderMarkers.TryReadFolderId(folder.Path) is null)
+                    // Never write our marker into an unrelated directory
+                    // that appeared at the same registered path.
+                    var storedIdentityKnown =
+                        folder.VolumeSerialNumber != 0 &&
+                        !string.IsNullOrWhiteSpace(folder.FileId);
+
+                    if (_folderMarkers.TryReadFolderId(folder.Path) is null &&
+                        (!storedIdentityKnown ||
+                         _folderIdentity.Matches(
+                             folder.Path,
+                             folder.VolumeSerialNumber,
+                             folder.FileId)))
                     {
                         _folderMarkers.EnsureMarker(
                             folder.Path,
@@ -501,6 +512,23 @@ public partial class MainWindow : Window
 
         try
         {
+            // Existing protected profiles must not become ancestors or
+            // descendants of newly registered managed folders.
+            var protectedConflict = _folders.FirstOrDefault(existing =>
+                _protection.HasPreparedProfile(existing.Id) &&
+                ManagedFolderPathSafety.Overlaps(existing.Path, path));
+
+            if (protectedConflict is not null)
+            {
+                MessageBox.Show(this,
+                    "Нельзя добавить папку внутрь защищённой managed-папки или выбрать её родителя.\n\n" +
+                    $"Защищённый путь: {protectedConflict.Path}",
+                    "GeniaFolder — пересечение защиты",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
             var markerId = _folderMarkers.TryReadFolderId(path);
 
             if (markerId is Guid existingId &&
@@ -602,6 +630,27 @@ public partial class MainWindow : Window
     {
         if (!TryGetFolder(sender, out var folder))
             return;
+
+        var currentStorage = _protection.HasPreparedProfile(folder.Id)
+            ? _protection.GetStorageInfo(folder.Id)?.State
+                ?? VaultStorageState.PlaintextPresent
+            : VaultStorageState.PlaintextPresent;
+
+        // An encrypted parent containing another managed folder can
+        // accidentally include or remove data owned by the second profile.
+        if (currentStorage == VaultStorageState.PlaintextPresent &&
+            ManagedFolderPathSafety.FindOverlappingManagedPath(
+                folder, _folders) is { } conflict)
+        {
+            MessageBox.Show(this,
+                "Эту папку нельзя защищать, пока она пересекается с другой папкой GeniaFolder.\n\n" +
+                $"Конфликтующий путь: {conflict}\n\n" +
+                "Переместите вложенную managed-папку или уберите её карточку, затем повторите.",
+                "GeniaFolder — пересекающиеся папки",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
 
         if (_protection.HasPreparedProfile(folder.Id))
         {
@@ -912,6 +961,19 @@ public partial class MainWindow : Window
 
                 authenticatedWithoutVault = true;
             }
+        }
+
+        if (_folders.Any(other =>
+            other.Id != folder.Id &&
+            _protection.HasPreparedProfile(other.Id) &&
+            ManagedFolderPathSafety.Overlaps(other.Path, selectedPath)))
+        {
+            MessageBox.Show(this,
+                "Нельзя перепривязать папку внутрь другой защищённой managed-папки или к её родителю.",
+                "GeniaFolder — пересечение защиты",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
         }
 
         var newIdentity =

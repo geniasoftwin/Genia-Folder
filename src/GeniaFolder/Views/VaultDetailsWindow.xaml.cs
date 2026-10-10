@@ -61,6 +61,18 @@ public partial class VaultDetailsWindow : Window
                     : "Разблокировать папку";
                 break;
 
+            case VaultStorageState.DeletionCommitted:
+                StateBorder.Background = new SolidColorBrush(
+                    Color.FromRgb(0xFF, 0xF8, 0xE1));
+                StateBorder.BorderBrush = new SolidColorBrush(
+                    Color.FromRgb(0xF4, 0xD7, 0x7D));
+                StateText.Foreground = new SolidColorBrush(
+                    Color.FromRgb(0x6B, 0x57, 0x15));
+                StateText.Text =
+                    "Удаление plaintext было подтверждено после проверки изолированной папки, но не завершилось. Можно безопасно продолжить финализацию.";
+                StorageActionButton.Content = "Завершить блокировку";
+                break;
+
             case VaultStorageState.LockPending:
                 StateBorder.Background = new SolidColorBrush(
                     Color.FromRgb(0xFF, 0xF8, 0xE1));

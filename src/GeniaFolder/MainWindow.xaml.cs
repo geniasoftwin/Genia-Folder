@@ -343,11 +343,14 @@ public partial class MainWindow : Window
                 protectionEnabled = vaultAvailable;
                 cardOpacity = 1.0;
             }
-            else if (storageState == VaultStorageState.LockPending)
+            else if (storageState is VaultStorageState.LockPending or VaultStorageState.DeletionCommitted)
             {
+                var committed = storageState == VaultStorageState.DeletionCommitted;
                 status = vaultAvailable
-                    ? "Блокировка не завершена · LockPending · откройте Vault для продолжения"
-                    : "КРИТИЧНО: LockPending, но encrypted vault недоступен";
+                    ? committed
+                        ? "Удаление было подтверждено · завершите блокировку в Vault"
+                        : "Блокировка не завершена · повторная проверка в Vault"
+                    : "КРИТИЧНО: блокировка прервана и encrypted vault недоступен";
 
                 statusBrush = vaultAvailable
                     ? Brushes.DarkGoldenrod
@@ -1031,7 +1034,7 @@ public partial class MainWindow : Window
             if (storageState != VaultStorageState.PlaintextPresent)
             {
                 MessageBox.Show(this,
-                    "Папку в состоянии Vault-only или LockPending нельзя убирать из GeniaFolder. " +
+                    "Папку в состоянии Vault-only или незавершённой блокировки нельзя убирать из GeniaFolder. " +
                     "Сначала завершите разблокировку/восстановление, чтобы не потерять доступ к управлению encrypted vault.",
                     "GeniaFolder — защищённая папка",
                     MessageBoxButton.OK,

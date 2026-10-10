@@ -20,6 +20,55 @@ internal static class Program
         {
             Console.WriteLine("=== GeniaFolder Security Smoke Tests ===");
 
+            var registryPath = Path.Combine(root, "registry", "folders.json");
+            var registry = new FolderRegistryService(registryPath);
+            var registryId = Guid.NewGuid();
+
+            var registryWrites = Enumerable.Range(0, 12)
+                .Select(i => registry.SaveAsync(
+                    [new ManagedFolder
+                    {
+                        Id = registryId,
+                        Name = $"Revision-{i}",
+                        Path = Path.Combine(root, $"revision-{i}")
+                    }]))
+                .ToArray();
+
+            await Task.WhenAll(registryWrites);
+
+            var registryLoaded = await registry.LoadAsync();
+            Assert(
+                registryLoaded.Count == 1 &&
+                registryLoaded[0].Id == registryId &&
+                !Directory.EnumerateFiles(
+                    Path.GetDirectoryName(registryPath)!,
+                    "folders.json.tmp-*").Any(),
+                "concurrent registry saves must remain valid and clean staging files");
+
+            Pass("concurrent registry writes serialize atomically");
+
+            var parentManaged = new ManagedFolder
+            {
+                Id = Guid.NewGuid(),
+                Path = Path.Combine(root, "overlap-parent")
+            };
+            var childManaged = new ManagedFolder
+            {
+                Id = Guid.NewGuid(),
+                Path = Path.Combine(parentManaged.Path, "nested")
+            };
+            Assert(
+                ManagedFolderPathSafety.FindOverlappingManagedPath(
+                    parentManaged, [parentManaged, childManaged]) == childManaged.Path,
+                "protecting parent of another managed folder must be blocked");
+
+            Assert(
+                ManagedFolderPathSafety.FindOverlappingManagedPath(
+                    childManaged, [parentManaged, childManaged]) == parentManaged.Path,
+                "protecting nested managed folder must be blocked");
+
+            Pass("overlapping managed-folder protection detected");
+
             var identityProbe = new FolderIdentityService();
             var identityOriginal = Path.Combine(root, "identity-original");
             var identityRenamed = Path.Combine(root, "identity-renamed");
@@ -934,6 +983,99 @@ internal static class Program
                 source);
 
             Pass("final unlock after resumed LockPending is byte-identical");
+
+            // Simulate hard kill AFTER source move but BEFORE destructive
+            // commit; modifying the quarantined bytes must not be deleted.
+            var unverifiedPending = Path.Combine(
+                root,
+                $".geniafolder-plaintext-{folder.Id:N}.pending-delete-unverified");
+
+            await protection.MarkLockPendingAsync(
+                folder.Id, unverifiedPending);
+
+            Directory.Move(source, unverifiedPending);
+            var lateModification = Path.Combine(
+                unverifiedPending, "late.txt");
+
+            await File.WriteAllTextAsync(
+                lateModification,
+                "Modified after original-path verification.",
+                Encoding.UTF8);
+
+            using (var session =
+                await RequirePasswordSessionAsync(protection, folder.Id))
+            {
+                await ExpectInvalidOperationAsync(
+                    "quarantine changed before final verification",
+                    async () => await vaultOnly.ActivateOrResumeAsync(
+                        folder, vaultInfo, session));
+            }
+
+            Assert(
+                Directory.Exists(source) &&
+                !Directory.Exists(unverifiedPending) &&
+                File.Exists(Path.Combine(source, "late.txt")),
+                "failed quarantine verification must restore all plaintext");
+            Assert(
+                protection.GetStorageInfo(folder.Id)?.State ==
+                    VaultStorageState.PlaintextPresent,
+                "failed quarantine verification must roll back profile state");
+
+            File.Delete(Path.Combine(source, "late.txt"));
+            Pass("unverified quarantine changes roll back without deletion");
+
+            // Simulate a process kill AFTER full verification and persistent
+            // deletion commit, with plaintext already partly deleted.
+            var committedPending = Path.Combine(
+                root,
+                $".geniafolder-plaintext-{folder.Id:N}.pending-delete-committed");
+
+            await protection.MarkLockPendingAsync(
+                folder.Id, committedPending);
+            Directory.Move(source, committedPending);
+
+            var committedCandidate = new ManagedFolder
+            {
+                Id = folder.Id,
+                Path = committedPending
+            };
+
+            using (var session =
+                await RequirePasswordSessionAsync(protection, folder.Id))
+            {
+                await vault.VerifySourceMatchesVaultAsync(
+                    committedCandidate,
+                    built.VaultPath,
+                    session);
+            }
+
+            await protection.MarkDeletionCommittedAsync(folder.Id);
+            File.Delete(Path.Combine(committedPending, "root.txt"));
+
+            using (var session =
+                await RequirePasswordSessionAsync(protection, folder.Id))
+            {
+                await vaultOnly.ActivateOrResumeAsync(
+                    folder, vaultInfo, session);
+            }
+
+            Assert(
+                !Directory.Exists(source) &&
+                !Directory.Exists(committedPending) &&
+                protection.GetStorageInfo(folder.Id)?.State ==
+                    VaultStorageState.VaultOnly,
+                "committed partially deleted quarantine must safely finish");
+
+            using (var session =
+                await RequirePasswordSessionAsync(protection, folder.Id))
+            {
+                await vault.RestoreVaultAsync(
+                    built.VaultPath, source, session);
+            }
+            await protection.MarkPlaintextPresentAsync(folder.Id);
+            await AssertTreesEqualAsync(passwordRestore, source);
+
+            Pass("crash during committed deletion safely resumes and restores");
 
             Console.WriteLine();
             Console.WriteLine("[PASS] All security smoke tests passed.");

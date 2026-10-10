@@ -212,6 +212,16 @@ public sealed class VaultOnlyService
                 !Directory.Exists(folder.Path))
             {
                 Directory.Move(pendingPath, folder.Path);
+
+                // Quarantine was hidden for privacy. Do not leave a rolled
+                // back source invisible in Explorer. Preserve System/ReadOnly
+                // flags used by desktop.ini customization.
+                var restoredAttributes =
+                    File.GetAttributes(folder.Path);
+                File.SetAttributes(
+                    folder.Path,
+                    restoredAttributes & ~FileAttributes.Hidden);
+
                 await _protection.MarkPlaintextPresentAsync(
                     folder.Id).ConfigureAwait(false);
             }

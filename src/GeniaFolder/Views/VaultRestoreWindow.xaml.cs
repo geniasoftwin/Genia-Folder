@@ -52,6 +52,11 @@ public partial class VaultRestoreWindow : Window
 
         if (verifyExistingPlaintextOnly)
         {
+            HeadingText.Text = relocationVerification
+                ? "Проверить перемещённую папку"
+                : "Проверить существующие файлы";
+            DestinationLabel.Text = "Проверяемая папка:";
+
             if (relocationVerification)
             {
                 Title = "Проверка перемещённой папки — GeniaFolder";
@@ -112,7 +117,7 @@ public partial class VaultRestoreWindow : Window
 
         var useRecovery = RecoveryRadio.IsChecked == true;
         var password = PasswordBox.Password;
-        var recoveryKey = RecoveryKeyBox.Text.Trim();
+        var recoveryKey = RecoveryKeyBox.Password.Trim();
 
         if (useRecovery)
         {

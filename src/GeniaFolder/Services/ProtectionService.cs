@@ -267,6 +267,22 @@ public sealed class ProtectionService
         await SaveProfileAtomicAsync(profile, overwrite: true);
     }
 
+    public async Task MarkDeletionCommittedAsync(Guid folderId)
+    {
+        var profile = await LoadProfileAsync(folderId)
+            ?? throw new InvalidOperationException("Профиль защиты не найден.");
+
+        if (profile.Storage.State != VaultStorageState.LockPending ||
+            string.IsNullOrWhiteSpace(profile.Storage.PendingPlaintextPath))
+        {
+            throw new InvalidOperationException(
+                "Нельзя начать удаление без подтверждённого LockPending.");
+        }
+
+        profile.Storage.State = VaultStorageState.DeletionCommitted;
+        await SaveProfileAtomicAsync(profile, overwrite: true);
+    }
+
     public async Task MarkVaultOnlyAsync(Guid folderId)
     {
         var profile = await LoadProfileAsync(folderId)

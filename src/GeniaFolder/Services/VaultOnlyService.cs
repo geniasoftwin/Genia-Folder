@@ -20,7 +20,8 @@ public sealed class VaultOnlyService
         VaultCopyInfo vaultInfo,
         UnlockedProtectionSession session,
         IProgress<VaultBuildProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action? onNonCancellablePhase = null)
     {
         ArgumentNullException.ThrowIfNull(folder);
         ArgumentNullException.ThrowIfNull(vaultInfo);
@@ -49,6 +50,7 @@ public sealed class VaultOnlyService
 
         if (storage.State == VaultStorageState.DeletionCommitted)
         {
+            onNonCancellablePhase?.Invoke();
             // This state is durable: a complete verification of the isolated
             // plaintext succeeded BEFORE any deletion began. Resuming a
             // partially deleted quarantine must never hash partial contents.
@@ -59,6 +61,7 @@ public sealed class VaultOnlyService
 
         if (storage.State == VaultStorageState.LockPending)
         {
+            onNonCancellablePhase?.Invoke();
             await ResumePendingLockAsync(
                 folder, vaultInfo, storage, session,
                 progress, cancellationToken).ConfigureAwait(false);
@@ -91,6 +94,8 @@ public sealed class VaultOnlyService
         // LockPending is persisted BEFORE moving any user data.
         await _protection.MarkLockPendingAsync(
             folder.Id, pendingPath).ConfigureAwait(false);
+
+        onNonCancellablePhase?.Invoke();
 
         // Cancellation is intentionally ignored from here until quarantine
         // is verified/rolled back or deletion is committed.

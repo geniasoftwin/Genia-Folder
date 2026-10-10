@@ -121,12 +121,12 @@ public partial class VaultLockWindow : Window
                     onNonCancellablePhase: () =>
                     {
                         _commitStarted = true;
-                        Dispatcher.BeginInvoke(() =>
+                        Dispatcher.BeginInvoke(new Action(() =>
                         {
                             CancelButton.IsEnabled = false;
                             StatusText.Text =
                                 "Папка изолирована. Завершаем обязательную проверку и транзакцию…";
-                        });
+                        }));
                     }));
 
             SetRunning(false);

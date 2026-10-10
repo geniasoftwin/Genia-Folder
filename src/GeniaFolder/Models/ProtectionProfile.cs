@@ -23,6 +23,7 @@ public enum VaultStorageState
 {
     PlaintextPresent,
     LockPending,
+    DeletionCommitted,
     VaultOnly
 }
 

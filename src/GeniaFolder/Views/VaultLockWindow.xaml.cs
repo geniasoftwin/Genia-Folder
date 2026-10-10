@@ -14,7 +14,7 @@ public partial class VaultLockWindow : Window
 
     private CancellationTokenSource? _cancellation;
     private bool _running;
-    private bool _commitStarted;
+    private volatile bool _commitStarted;
     private bool _cancelRequested;
     private bool _closeAfterCancel;
 
@@ -117,7 +117,17 @@ public partial class VaultLockWindow : Window
                     _vaultInfo,
                     session,
                     progress,
-                    _cancellation.Token));
+                    _cancellation.Token,
+                    onNonCancellablePhase: () =>
+                    {
+                        _commitStarted = true;
+                        Dispatcher.BeginInvoke(() =>
+                        {
+                            CancelButton.IsEnabled = false;
+                            StatusText.Text =
+                                "Папка изолирована. Завершаем обязательную проверку и транзакцию…";
+                        });
+                    }));
 
             SetRunning(false);
             DialogResult = true;
@@ -223,7 +233,9 @@ public partial class VaultLockWindow : Window
         if (_cancelRequested)
             return;
 
-        if (progress.Stage is "Финализация Vault-only" or "Продолжение Vault-only")
+        if (progress.Stage is "Изоляция plaintext" or
+            "Финальная сверка изолированных данных" or
+            "Безвозвратная финализация Vault-only")
         {
             _commitStarted = true;
             CancelButton.IsEnabled = false;

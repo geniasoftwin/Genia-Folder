@@ -1021,6 +1021,10 @@ internal static class Program
                     VaultStorageState.PlaintextPresent,
                 "failed quarantine verification must roll back profile state");
 
+            Assert(
+                (File.GetAttributes(source) & FileAttributes.Hidden) == 0,
+                "rolled-back plaintext directory must remain visible in Explorer");
+
             File.Delete(Path.Combine(source, "late.txt"));
             Pass("unverified quarantine changes roll back without deletion");
 

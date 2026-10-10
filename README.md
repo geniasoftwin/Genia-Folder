@@ -2,7 +2,7 @@
 
 Windows folder manager with colored Explorer folders, tray support, single-instance control, and secure encrypted vaults in development.
 
-## Current version: 0.2.0-alpha.16
+## Current version: 0.2.0-alpha.17
 
 Implemented:
 
@@ -244,3 +244,12 @@ Explorer color customization now follows Microsoft's documented Desktop.ini form
 ## 0.2.0-alpha.16 active Explorer view refresh
 
 Changing a folder color now refreshes not only Shell metadata and icon caches but also any open File Explorer window currently showing the folder or its parent directory. GeniaFolder performs best-effort Shell COM refreshes immediately and again after short delays, while also sending change notifications for the new icon file, `desktop.ini`, the folder itself and its parent. This replaces the manual repeated-F5 workaround observed on some Windows Explorer sessions.
+
+
+## 0.2.0-alpha.17: safer Vault-only commit
+
+Before deleting plaintext, the source directory is moved into a sibling quarantine recorded in the profile as LockPending; the quarantined data is verified against the authenticated vault again. If that verification fails, the entire quarantine is moved back to the original path and the profile returns to PlaintextPresent. Only after successful verification is the durable DeletionCommitted state written, which permits resuming partial deletion after process termination. An uncommitted missing plaintext+quarantine combination is now treated as an error, not as success.
+
+The registry now serializes reads and writes and uses unique atomic staging files. Conflicting managed-folder ancestor/descendant protection is rejected and missing folder markers are not stamped into known-identity mismatches. Master Recovery entry in the vault restore/verification window is hidden, relocation verification uses its own headings, and the lock UI receives an explicit non-cancellable-phase signal.
+
+Security smoke tests cover registry concurrency, overlapping folder detection, changed quarantine rollback, and a simulated hard kill during committed deletion. These tests are not a substitute for checking Explorer caching or live concurrent writers; continue testing with disposable data.
